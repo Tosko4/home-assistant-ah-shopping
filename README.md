@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.2
+## 0.2.3
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -60,8 +60,20 @@ scan_label: Scan product
 
 - `show_header`: title, item count and total amount.
 - `show_scan`: full-width barcode scan button.
-- `show_products`: shopping-list product rows.
+- `show_products`: product rows.
+- `product_source`: which product set the card displays.
 - `height`: fixed card height when the product list is visible; the list scrolls internally.
+
+Available product sources:
+
+```yaml
+product_source: shopping_list   # Mijn lijst
+product_source: cart            # actief winkelmandje
+product_source: next_order      # eerstvolgende ingeplande bestelling
+product_source: cart_and_order  # winkelmandje + volgende bestelling
+```
+
+The combined view merges identical products by product id and adds their quantities. Order/cart views are read-only in the card; +/- remains available only for the AH shopping list. The barcode scanner always adds to the AH shopping list.
 
 For a scanner-only card:
 
@@ -91,6 +103,7 @@ The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses t
 - `sensor.albert_heijn_shopping_estimated_total` — estimated EUR total
 - `sensor.albert_heijn_shopping_bonus_savings` — calculated supported Bonus savings
 - `sensor.albert_heijn_next_order` — total quantity in the next scheduled AH order; attributes include order id, delivery date/time, total price, unique item count and all ordered product lines
+- `sensor.albert_heijn_shopping_cart` — total quantity in the active AH cart; attributes include cart/order id, total price, discount, unique item count and product lines
 - `todo.albert_heijn_shopping_list` — read-only native HA view of the AH list
 
 ## Services
@@ -223,3 +236,13 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Keeps legacy `mode: scan_only` cards working.
 - Adds `sensor.albert_heijn_next_order` for the earliest open scheduled AH fulfillment.
 - The next-order sensor exposes total quantity, unique product count, delivery slot, total order price, modifiable status and all product lines with quantity/price/Bonus/category details.
+
+
+### 0.2.3
+
+- Adds an active AH shopping-cart sensor using `/mobile-services/order/v1/summaries/active?sortBy=DEFAULT`.
+- Adds dashboard `product_source` choices for shopping list, active cart, next scheduled order, or cart + order combined.
+- Combined cart/order view merges identical products and sums their quantities.
+- Cart/order product views are intentionally read-only; +/- remains limited to the shopping list.
+- The scanner continues to add products to the shopping list regardless of the displayed product source.
+- Card title defaults to the selected product source unless a custom title is configured.
