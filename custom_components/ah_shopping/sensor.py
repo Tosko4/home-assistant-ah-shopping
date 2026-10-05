@@ -11,17 +11,15 @@ from .entity import AhShoppingEntity
 async def async_setup_entry(hass: HomeAssistant, entry: AhShoppingConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback) -> None:
     coordinator = entry.runtime_data.coordinator
     order_coordinator = entry.runtime_data.order_coordinator
-    cart_coordinator = entry.runtime_data.cart_coordinator
     async_add_entities([
         AhShoppingListSensor(coordinator),
         AhShoppingTotalSensor(coordinator),
         AhShoppingBonusSavingsSensor(coordinator),
         AhNextOrderSensor(order_coordinator),
-        AhActiveCartSensor(cart_coordinator),
     ])
 
 class AhShoppingListSensor(AhShoppingEntity, SensorEntity):
-    _attr_name = "Albert Heijn Shopping List"
+    _attr_name = "Albert Heijn Shopping Cart"
     _attr_icon = "mdi:cart-outline"
     def __init__(self, coordinator):
         super().__init__(coordinator)
@@ -89,22 +87,3 @@ class AhNextOrderSensor(AhShoppingEntity, SensorEntity):
         return data
 
 
-
-class AhActiveCartSensor(AhShoppingEntity, SensorEntity):
-    _attr_name = "Albert Heijn Shopping Cart"
-    _attr_icon = "mdi:cart-variant"
-
-    def __init__(self, coordinator):
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_active_cart"
-
-    @property
-    def native_value(self) -> int:
-        return self.coordinator.data.total_quantity
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        data = self.coordinator.data.as_dict()
-        data["ah_active_cart"] = True
-        data["pending_changes"] = self.coordinator.pending_change_count
-        return data
