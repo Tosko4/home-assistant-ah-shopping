@@ -58,3 +58,43 @@ def test_nested_money_amount_contributes_to_list_total():
         (ShoppingItem("i1", 110, 1, "Testproduct", p),),
     )
     assert data.estimated_total == 1.10
+
+
+def test_second_half_price_bonus_four_items():
+    p = Product(
+        id=602290,
+        title="AH Zaanlander Belegen 48+ plakken",
+        price_now=2.89,
+        price_was=2.89,
+        is_bonus=True,
+        bonus_mechanism="2e HALVE PRIJS",
+    )
+    item = ShoppingItem("x", p.id, 4, p.title, p)
+    assert item.line_total == 11.56
+    assert item.bonus_savings == 2.89
+    assert item.line_total_after_bonus == 8.67
+
+
+def test_user_example_total_matches_ah_app():
+    mimo = Product(id=575439, title="MIMO Cookie dough", price_now=3.99)
+    cheese = Product(
+        id=602290,
+        title="AH Zaanlander",
+        price_now=2.89,
+        price_was=2.89,
+        is_bonus=True,
+        bonus_mechanism="2e HALVE PRIJS",
+    )
+    other = Product(id=999999, title="Other items", price_now=16.47)
+    data = ShoppingListData(
+        "abc",
+        "Boodschappen",
+        (
+            ShoppingItem("mimo", mimo.id, 1, mimo.title, mimo),
+            ShoppingItem("cheese", cheese.id, 4, cheese.title, cheese),
+            ShoppingItem("other", other.id, 1, other.title, other),
+        ),
+    )
+    assert data.subtotal == 32.02
+    assert data.bonus_savings == 2.89
+    assert data.estimated_total == 29.13
