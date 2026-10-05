@@ -373,6 +373,25 @@ class ActiveCartData:
     def unique_items(self) -> int:
         return len(self.items)
 
+    def item_for_product(self, product_id: int) -> NextOrderItem | None:
+        return next((item for item in self.items if item.product_id == product_id), None)
+
+    def quantity_for_product(self, product_id: int) -> int:
+        item = self.item_for_product(product_id)
+        return item.quantity if item else 0
+
+    def with_product_quantity(self, product_id: int, quantity: int) -> "ActiveCartData":
+        """Return a copy with an existing cart product quantity changed."""
+        quantity = max(0, int(quantity))
+        updated: list[NextOrderItem] = []
+        for item in self.items:
+            if item.product_id != product_id:
+                updated.append(item)
+                continue
+            if quantity > 0:
+                updated.append(replace(item, quantity=quantity))
+        return replace(self, items=tuple(updated))
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "order_id": self.order_id,
