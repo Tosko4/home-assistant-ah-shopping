@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import AhShoppingApiClient
 from .const import CONF_ACCESS_TOKEN, CONF_EXPIRES_AT, CONF_MEMBER_ID, CONF_REFRESH_TOKEN, DOMAIN, PLATFORMS
-from .coordinator import AhShoppingCoordinator
+from .coordinator import AhNextOrderCoordinator, AhShoppingCoordinator
 from .frontend import async_register_frontend
 from .services import async_setup_services, async_unload_services
 
@@ -15,6 +15,7 @@ from .services import async_setup_services, async_unload_services
 class AhShoppingRuntimeData:
     client: AhShoppingApiClient
     coordinator: AhShoppingCoordinator
+    order_coordinator: AhNextOrderCoordinator
 
 type AhShoppingConfigEntry = ConfigEntry[AhShoppingRuntimeData]
 
@@ -26,8 +27,10 @@ async def async_setup_entry(hass:HomeAssistant,entry:AhShoppingConfigEntry)->boo
         hass.config_entries.async_update_entry(entry,data={**entry.data,**token_data})
     client=AhShoppingApiClient(async_get_clientsession(hass), access_token=str(entry.data.get(CONF_ACCESS_TOKEN,"")), refresh_token=str(entry.data.get(CONF_REFRESH_TOKEN,"")), expires_at=float(entry.data.get(CONF_EXPIRES_AT,0) or 0), member_id=str(entry.data.get(CONF_MEMBER_ID,"")), token_update_callback=save_tokens)
     coordinator=AhShoppingCoordinator(hass,entry,client)
+    order_coordinator=AhNextOrderCoordinator(hass,entry,client)
     await coordinator.async_config_entry_first_refresh()
-    entry.runtime_data=AhShoppingRuntimeData(client,coordinator)
+    await order_coordinator.async_config_entry_first_refresh()
+    entry.runtime_data=AhShoppingRuntimeData(client,coordinator,order_coordinator)
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     await async_setup_services(hass)
     await async_register_frontend(hass)
