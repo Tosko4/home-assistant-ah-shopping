@@ -155,3 +155,74 @@ def test_missing_bulk_product_uses_detail_price_fallback():
     data = asyncio.run(ListClient(None, access_token="token").async_get_shopping_data())
     assert data.items[0].product.price_now == 3.99
     assert data.items[0].line_total == 3.99
+
+
+def test_search_products_accepts_data_key():
+    class SearchClient(AhShoppingApiClient):
+        async def _raw_request(self, method, path, **kwargs):
+            assert method == "GET"
+            assert "/mobile-services/product/search/v2?" in path
+            return {
+                "data": [
+                    {
+                        "id": 42,
+                        "description": "Zoekproduct",
+                        "price": {"amount": 2.49},
+                        "unitSize": "500 g",
+                        "imageUrl": "https://example.invalid/product.jpg",
+                    }
+                ]
+            }
+
+    products = asyncio.run(
+        SearchClient(None, access_token="token").async_search_products("zoek", 8)
+    )
+    assert len(products) == 1
+    assert products[0].id == 42
+    assert products[0].title == "Zoekproduct"
+    assert products[0].price_now == 2.49
+    assert products[0].unit_size == "500 g"
+    assert products[0].image_url.endswith("product.jpg")
+
+
+def test_quantity_write_preserves_description_and_checked_state():
+    class ListClient(AhShoppingApiClient):
+        request = None
+
+        async def _raw_request(self, method, path, **kwargs):
+            self.request = (method, path, kwargs)
+            return {}
+
+    client = ListClient(None, access_token="token")
+    asyncio.run(
+        client.async_set_product_quantity(
+            "ignored",
+            12345,
+            3,
+            description="Productnaam",
+            checked=True,
+        )
+    )
+    _, _, kwargs = client.request
+    item = kwargs["json_body"]["items"][0]
+    assert item["description"] == "Productnaam"
+    assert item["quantity"] == 3
+    assert item["strikeThrough"] is True
+    assert item["productId"] == 12345
+
+
+def test_free_text_write_has_no_product_id():
+    class ListClient(AhShoppingApiClient):
+        request = None
+
+        async def _raw_request(self, method, path, **kwargs):
+            self.request = (method, path, kwargs)
+            return {}
+
+    client = ListClient(None, access_token="token")
+    asyncio.run(client.async_add_free_text_item("bananen", 2))
+    item = client.request[2]["json_body"]["items"][0]
+    assert item["description"] == "bananen"
+    assert item["quantity"] == 2
+    assert item["strikeThrough"] is False
+    assert "productId" not in item
