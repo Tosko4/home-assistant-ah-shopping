@@ -98,3 +98,28 @@ def test_user_example_total_matches_ah_app():
     assert data.subtotal == 32.02
     assert data.bonus_savings == 2.89
     assert data.estimated_total == 29.13
+
+
+def test_optimistic_quantity_update():
+    p = Product(id=10, title="Melk", price_now=2.0)
+    data = ShoppingListData(
+        "abc",
+        "Boodschappen",
+        (ShoppingItem("x", 10, 1, "Melk", p),),
+    )
+    changed = data.with_product_quantity(10, 4)
+    assert data.items[0].quantity == 1
+    assert changed.items[0].quantity == 4
+    assert changed.estimated_total == 8.0
+
+
+def test_optimistic_quantity_zero_removes_product():
+    p = Product(id=10, title="Melk", price_now=2.0)
+    data = ShoppingListData(
+        "abc",
+        "Boodschappen",
+        (ShoppingItem("x", 10, 1, "Melk", p),),
+    )
+    changed = data.with_product_quantity(10, 0)
+    assert changed.items == ()
+    assert changed.total_quantity == 0
