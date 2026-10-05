@@ -1,7 +1,7 @@
-import { decodeEANFromImageData } from './ean-decoder.js';
+import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._search=[]; this._busy=false; this._scanner=null; this._scanLoop=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null;}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._search=[]; this._busy=false; this._scanner=null; this._scanLoop=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false;}
   static getStubConfig(){return {title:'Boodschappen'};}
   static getConfigForm(){return {schema:[{name:'entity',selector:{entity:{domain:'sensor'}}},{name:'title',selector:{text:{}}}]};}
   setConfig(config){this._config={title:'Boodschappen',...config}; this._render();}
@@ -39,19 +39,85 @@ class AhShoppingCard extends HTMLElement {
     this.shadowRoot.appendChild(modal);this._scanner=modal;modal.querySelector('#close').onclick=()=>this._closeScanner();modal.querySelector('#cancel').onclick=()=>this._closeScanner();modal.querySelector('#flip').onclick=async()=>{this._facing=this._facing==='environment'?'user':'environment';await this._startCamera();}; await this._startCamera();
   }
   async _startCamera(){
-    if(!this._scanner)return; this._stopCamera(); const video=this._scanner.querySelector('video'),status=this._scanner.querySelector('#scanstatus');
-    try{const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:this._facing},width:{ideal:1280},height:{ideal:720}},audio:false});this._stream=stream;video.srcObject=stream;await video.play();status.textContent=this._facing==='environment'?'Achtercamera actief':'Frontcamera actief';this._scanCanvas=document.createElement('canvas');this._scheduleScan();}
+    if(!this._scanner)return;
+    this._stopCamera();
+    this._scanCount=0;
+    this._scanBusy=false;
+    const video=this._scanner.querySelector('video'),status=this._scanner.querySelector('#scanstatus');
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:this._facing},width:{ideal:1920},height:{ideal:1080}},audio:false});
+      this._stream=stream;
+      video.srcObject=stream;
+      await video.play();
+      this._scanCanvas=document.createElement('canvas');
+      await this._initBarcodeDetector();
+      status.textContent=`${this._facing==='environment'?'Achtercamera':'Frontcamera'} · scanner: ${this._decoderMode==='native'?'native':'fallback'} · zoeken…`;
+      this._scheduleScan();
+    }
     catch(e){status.textContent=`Camera kon niet openen: ${e.message||e}`;}
+  }
+
+  async _initBarcodeDetector(){
+    this._barcodeDetector=null;
+    this._decoderMode='local';
+    if(!('BarcodeDetector' in window)) return;
+    try{
+      const wanted=['ean_13','ean_8','upc_a','upc_e'];
+      let formats=wanted;
+      if(typeof window.BarcodeDetector.getSupportedFormats==='function'){
+        const supported=await window.BarcodeDetector.getSupportedFormats();
+        formats=wanted.filter(f=>supported.includes(f));
+      }
+      if(!formats.length) return;
+      this._barcodeDetector=new window.BarcodeDetector({formats});
+      this._decoderMode='native';
+    }catch(e){
+      this._barcodeDetector=null;
+      this._decoderMode='local';
+    }
   }
   _scheduleScan(){clearTimeout(this._scanLoop);this._scanLoop=setTimeout(()=>this._scanFrame(),140);}
   async _scanFrame(){
-    if(!this._scanner||!this._stream)return; const video=this._scanner.querySelector('video'); if(video.readyState<2||!video.videoWidth){this._scheduleScan();return;}
-    const c=this._scanCanvas,ctx=c.getContext('2d',{willReadFrequently:true}); const vw=video.videoWidth,vh=video.videoHeight; const rw=Math.floor(vw*.88),rh=Math.floor(vh*.42),sx=Math.floor((vw-rw)/2),sy=Math.floor((vh-rh)/2); c.width=Math.min(1000,rw);c.height=Math.max(120,Math.floor(rh*c.width/rw));ctx.drawImage(video,sx,sy,rw,rh,0,0,c.width,c.height);
-    let code=null;try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
-    if(code){await this._barcodeFound(code);return;} this._scheduleScan();
+    if(!this._scanner||!this._stream||this._scanBusy)return;
+    const video=this._scanner.querySelector('video');
+    if(video.readyState<2||!video.videoWidth){this._scheduleScan();return;}
+    this._scanBusy=true;
+    this._scanCount++;
+    const status=this._scanner.querySelector('#scanstatus');
+    let code=null;
+
+    if(this._barcodeDetector){
+      try{
+        const found=await this._barcodeDetector.detect(video);
+        const hit=(found||[]).find(x=>x?.rawValue);
+        if(hit) code=String(hit.rawValue).replace(/\D/g,'');
+      }catch(e){}
+    }
+
+    if(!code){
+      const c=this._scanCanvas,ctx=c.getContext('2d',{willReadFrequently:true});
+      const vw=video.videoWidth,vh=video.videoHeight;
+      const rw=Math.floor(vw*.92),rh=Math.floor(vh*.50),sx=Math.floor((vw-rw)/2),sy=Math.floor((vh-rh)/2);
+      c.width=Math.min(1200,rw);
+      c.height=Math.max(160,Math.floor(rh*c.width/rw));
+      ctx.drawImage(video,sx,sy,rw,rh,0,0,c.width,c.height);
+      try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
+    }
+
+    if(code && (/^\d{8}$/.test(code)||/^\d{12,14}$/.test(code)) && (code.length===12||code.length===14||checksumOk(code))){
+      this._scanBusy=false;
+      await this._barcodeFound(code);
+      return;
+    }
+
+    if(status && this._scanCount%8===0){
+      status.textContent=`${this._decoderMode==='native'?'Native scanner':'Fallback scanner'} actief · ${this._scanCount} frames gecontroleerd`;
+    }
+    this._scanBusy=false;
+    this._scheduleScan();
   }
   async _barcodeFound(code){const status=this._scanner?.querySelector('#scanstatus'); if(status)status.textContent=`Gevonden: ${code} — toevoegen…`; this._stopCamera(false); try{const r=await this._service('add_barcode',{barcode:code,quantity:1}); const p=r.product||{}; if(status)status.textContent=`✓ ${p.title||code} · ${p.quantity_on_list||1}× op de lijst`; if(navigator.vibrate)navigator.vibrate(80); setTimeout(()=>this._closeScanner(),1000);}catch(e){if(status)status.textContent=e.message||String(e);setTimeout(()=>this._startCamera(),1800);}}
-  _stopCamera(clear=true){clearTimeout(this._scanLoop);this._scanLoop=null;if(this._stream){this._stream.getTracks().forEach(t=>t.stop());this._stream=null;}if(clear)this._scanCanvas=null;}
+  _stopCamera(clear=true){clearTimeout(this._scanLoop);this._scanLoop=null;this._scanBusy=false;if(this._stream){this._stream.getTracks().forEach(t=>t.stop());this._stream=null;}if(clear){this._scanCanvas=null;this._barcodeDetector=null;}}
   _closeScanner(){this._stopCamera();this._scanner?.remove();this._scanner=null;}
   disconnectedCallback(){this._closeScanner();}
   _css(){return `:host{display:block}ha-card{overflow:hidden}.head{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 18px 12px}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400}.search{display:flex;gap:8px;padding:0 18px 12px}.search input{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--divider-color);border-radius:10px;background:var(--card-background-color);color:var(--primary-text-color);font-size:15px}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.results{margin:0 18px 12px;border:1px solid var(--divider-color);border-radius:10px;overflow:hidden}.result{width:100%;display:grid;grid-template-columns:40px 1fr auto;gap:8px;text-align:left;align-items:center;border-radius:0;border-bottom:1px solid var(--divider-color);background:var(--card-background-color)}.result:last-child{border-bottom:0}.result img{width:36px;height:36px;object-fit:contain}.result em{font-size:9px;color:#00a03c;font-style:normal;text-align:right}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.scanner{position:fixed;z-index:10000;inset:0;background:#000e;display:grid;place-items:center;padding:12px}.scanbox{width:min(720px,100%);background:var(--card-background-color);border-radius:16px;overflow:hidden}.scanhead{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:18px}.scanhead button{font-size:24px}.videoWrap{position:relative;background:#000;aspect-ratio:4/3}.videoWrap video{width:100%;height:100%;object-fit:cover}.guide{position:absolute;left:8%;right:8%;top:35%;height:30%;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 9999px #0005}.guide:after{content:'';position:absolute;left:5%;right:5%;top:50%;height:2px;background:#f33}.scanbuttons{display:flex;gap:8px;justify-content:center;padding:12px}.scanbuttons button{min-width:130px}#scanstatus{text-align:center;padding:10px 12px 0;color:var(--secondary-text-color)}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.search{padding-left:14px;padding-right:14px}}`;}
