@@ -49,21 +49,3 @@ remove_product:
       selector: {number: {mode: box}}
 refresh:
   name: Refresh list
-
-set_cart_quantity:
-  name: Set cart quantity
-  description: Set the absolute quantity of a product in the active AH shopping cart.
-  fields:
-    product_id:
-      required: true
-      selector: {number: {mode: box}}
-    quantity:
-      required: true
-      selector: {number: {min: 0, max: 99, mode: box}}
-remove_cart_product:
-  name: Remove cart product
-  description: Remove a product from the active AH shopping cart.
-  fields:
-    product_id:
-      required: true
-      selector: {number: {mode: box}}
