@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any
 
 
@@ -13,12 +14,7 @@ def _int(value: Any, default: int = 0) -> int:
 
 
 def _float(value: Any, default: float = 0.0) -> float:
-    """Normalise AH money values.
-
-    AH currently returns prices both as plain numbers and as nested money
-    objects such as {"amount": 1.10} (and, in some APIs,
-    {"amount": {"amount": 1.10}}).
-    """
+    """Normalise AH money values."""
     while isinstance(value, dict):
         if "amount" not in value:
             return default
@@ -63,7 +59,7 @@ class Product:
             price_now=price_now,
             price_was=price_was,
             is_bonus=bool(data.get("isBonus")),
-            bonus_mechanism=str(data.get("bonusMechanism", "")),
+            bonus_mechanism=str(data.get("bonusMechanism") or ""),
             image_url=best_image,
         )
 
@@ -103,7 +99,47 @@ class ShoppingItem:
 
     @property
     def line_total(self) -> float:
-        return (self.product.price_now if self.product else 0.0) * self.quantity
+        return round((self.product.price_now if self.product else 0.0) * self.quantity, 2)
+
+    @property
+    def bonus_savings(self) -> float:
+        """Return savings for multi-buy promotions we can calculate exactly."""
+        if not self.product or not self.product.is_bonus or self.product.price_now <= 0:
+            return 0.0
+
+        mechanism = (self.product.bonus_mechanism or "").upper().strip()
+        quantity = max(0, self.quantity)
+        unit = self.product.price_now
+
+        # Simple discounted unit prices are already reflected in currentPrice.
+        if self.product.price_was > unit:
+            return 0.0
+
+        if "2E HALVE PRIJS" in mechanism:
+            return round((quantity // 2) * unit * 0.5, 2)
+
+        if "1+1 GRATIS" in mechanism or "2E GRATIS" in mechanism:
+            return round((quantity // 2) * unit, 2)
+
+        match = re.search(r"(\d+)\s+HALEN\s+(\d+)\s+BETALEN", mechanism)
+        if match:
+            take, pay = int(match.group(1)), int(match.group(2))
+            if take > pay > 0:
+                return round((quantity // take) * (take - pay) * unit, 2)
+
+        match = re.search(r"(\d+)\s+VOOR\s+€?\s*([0-9]+(?:[\.,][0-9]{1,2})?)", mechanism)
+        if match:
+            take = int(match.group(1))
+            deal = float(match.group(2).replace(",", "."))
+            if take > 0:
+                groups = quantity // take
+                return round(groups * max(0.0, take * unit - deal), 2)
+
+        return 0.0
+
+    @property
+    def line_total_after_bonus(self) -> float:
+        return round(max(0.0, self.line_total - self.bonus_savings), 2)
 
     def as_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -113,7 +149,9 @@ class ShoppingItem:
             "title": self.title,
             "description": self.description,
             "is_product": self.is_product,
-            "line_total": round(self.line_total, 2),
+            "line_total": self.line_total,
+            "bonus_savings": self.bonus_savings,
+            "line_total_after_bonus": self.line_total_after_bonus,
         }
         if self.product:
             result.update(self.product.as_dict())
@@ -133,8 +171,16 @@ class ShoppingListData:
         return sum(max(item.quantity, 0) for item in self.items)
 
     @property
-    def estimated_total(self) -> float:
+    def subtotal(self) -> float:
         return round(sum(item.line_total for item in self.items), 2)
+
+    @property
+    def bonus_savings(self) -> float:
+        return round(sum(item.bonus_savings for item in self.items), 2)
+
+    @property
+    def estimated_total(self) -> float:
+        return round(self.subtotal - self.bonus_savings, 2)
 
     def quantity_for_product(self, product_id: int) -> int:
         item = self.item_for_product(product_id)
@@ -149,6 +195,8 @@ class ShoppingListData:
             "name": self.name,
             "total_quantity": self.total_quantity,
             "unique_items": len(self.items),
+            "subtotal": self.subtotal,
+            "bonus_savings": self.bonus_savings,
             "estimated_total": self.estimated_total,
             "items": [item.as_dict() for item in self.items],
         }
