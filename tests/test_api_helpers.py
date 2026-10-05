@@ -337,3 +337,70 @@ def test_next_order_without_fulfillment_is_empty():
     assert order.order_id == 0
     assert order.total_quantity == 0
     assert order.items == ()
+
+
+def test_active_cart_reads_products_and_totals():
+    class CartClient(AhShoppingApiClient):
+        async def _raw_request(self, method, path, **kwargs):
+            if path == "/mobile-services/order/v1/summaries/active?sortBy=DEFAULT":
+                return {
+                    "id": 321,
+                    "state": "OPEN",
+                    "shoppingType": "DELIVERY",
+                    "totalPrice": {
+                        "priceDiscount": 1.25,
+                        "priceTotalPayable": 9.75,
+                    },
+                    "orderedProducts": [
+                        {
+                            "quantity": 2,
+                            "product": {
+                                "webshopId": 42,
+                                "title": "Melk",
+                                "brand": "AH",
+                                "images": [{"url": "https://example.invalid/melk.jpg", "width": 400}],
+                            },
+                        }
+                    ],
+                }
+            raise AssertionError(path)
+
+        async def async_get_products(self, product_ids):
+            assert product_ids == [42]
+            from custom_components.ah_shopping.models import Product
+            return [
+                Product(
+                    id=42,
+                    title="Melk",
+                    brand="AH",
+                    unit_size="1 l",
+                    price_now=1.50,
+                    image_url="https://example.invalid/melk.jpg",
+                )
+            ]
+
+    cart = asyncio.run(
+        CartClient(None, access_token="token").async_get_active_cart()
+    )
+    assert cart.order_id == 321
+    assert cart.state == "OPEN"
+    assert cart.total_price == 9.75
+    assert cart.total_discount == 1.25
+    assert cart.unique_items == 1
+    assert cart.total_quantity == 2
+    assert cart.items[0].title == "Melk"
+    assert cart.items[0].price_now == 1.50
+
+
+def test_active_cart_404_is_empty():
+    class CartClient(AhShoppingApiClient):
+        async def _raw_request(self, method, path, **kwargs):
+            from custom_components.ah_shopping.exceptions import AhNotFoundError
+            raise AhNotFoundError("none")
+
+    cart = asyncio.run(
+        CartClient(None, access_token="token").async_get_active_cart()
+    )
+    assert cart.order_id == 0
+    assert cart.total_quantity == 0
+    assert cart.items == ()
