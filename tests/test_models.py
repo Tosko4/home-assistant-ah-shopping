@@ -168,3 +168,18 @@ def test_checked_state_update_keeps_quantity_and_product():
     assert changed.items[0].checked is True
     assert changed.items[0].quantity == 3
     assert changed.items[0].product == p
+
+
+def test_next_order_totals():
+    from custom_components.ah_shopping.models import NextOrderData, NextOrderItem
+
+    order = NextOrderData(
+        order_id=1,
+        items=(
+            NextOrderItem(10, "A", 2, price_now=1.50),
+            NextOrderItem(11, "B", 3, price_now=2.00),
+        ),
+    )
+    assert order.unique_items == 2
+    assert order.total_quantity == 5
+    assert order.as_dict()["items"][0]["line_total"] == 3.00
