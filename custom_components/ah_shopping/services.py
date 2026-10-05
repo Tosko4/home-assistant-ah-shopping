@@ -26,6 +26,16 @@ def _runtime(hass: HomeAssistant):
 async def _refresh(runtime) -> None:
     await runtime.coordinator.async_request_refresh()
 
+def _schedule_refresh(hass: HomeAssistant, runtime) -> None:
+    """Refresh from AH after a write without blocking the service response."""
+    hass.async_create_task(runtime.coordinator.async_request_refresh())
+
+def _optimistic_quantity(runtime, product_id: int, quantity: int) -> None:
+    """Update HA entities immediately after a successful AH write."""
+    runtime.coordinator.async_set_updated_data(
+        runtime.coordinator.data.with_product_quantity(product_id, quantity)
+    )
+
 async def _search(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     rt=_runtime(hass)
     try:
@@ -49,7 +59,8 @@ async def _add_product(hass: HomeAssistant, call: ServiceCall) -> ServiceRespons
     new=max(1, current+increment)
     try:
         await rt.client.async_set_product_quantity(rt.coordinator.data.list_id, pid, new)
-        await _refresh(rt)
+        _optimistic_quantity(rt, pid, new)
+        _schedule_refresh(hass, rt)
         return {"success":True, "product_id":pid, "quantity":new}
     except AhShoppingError as err:
         raise HomeAssistantError(str(err)) from err
@@ -61,7 +72,9 @@ async def _add_barcode(hass: HomeAssistant, call: ServiceCall) -> ServiceRespons
         current=rt.coordinator.data.quantity_for_product(p.id)
         new=max(1, current+call.data.get("quantity", 1))
         await rt.client.async_set_product_quantity(rt.coordinator.data.list_id, p.id, new)
-        await _refresh(rt)
+        if rt.coordinator.data.item_for_product(p.id):
+            _optimistic_quantity(rt, p.id, new)
+        _schedule_refresh(hass, rt)
         d=p.as_dict(); d["quantity_on_list"]=new
         return {"success":True, "product":d}
     except AhShoppingError as err:
@@ -71,7 +84,8 @@ async def _set_quantity(hass: HomeAssistant, call: ServiceCall) -> ServiceRespon
     rt=_runtime(hass); pid=call.data["product_id"]; qty=call.data["quantity"]
     try:
         await rt.client.async_set_product_quantity(rt.coordinator.data.list_id, pid, qty)
-        await _refresh(rt)
+        _optimistic_quantity(rt, pid, qty)
+        _schedule_refresh(hass, rt)
         return {"success":True, "product_id":pid, "quantity":qty}
     except AhShoppingError as err:
         raise HomeAssistantError(str(err)) from err
@@ -84,7 +98,8 @@ async def _remove(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
             await rt.client.async_set_product_quantity(
                 rt.coordinator.data.list_id, pid, 0
             )
-            await _refresh(rt)
+            _optimistic_quantity(rt, pid, 0)
+            _schedule_refresh(hass, rt)
         return {"success":True, "product_id":pid}
     except AhShoppingError as err:
         raise HomeAssistantError(str(err)) from err
