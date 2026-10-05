@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.10
+## MVP 0.1.11
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -143,3 +143,10 @@ The MVP scanner intentionally supports grocery-style **EAN-13 and EAN-8** only. 
 - Adds configurable `height` in pixels for the full card.
 - When a fixed height is configured, the product list scrolls internally while the header/search controls remain visible.
 - Adds optional `scan_label` for the scanner-only button.
+
+
+### 0.1.11
+
+- Quantity changes no longer wait for the full shopping-list/product refresh.
+- After a successful AH PATCH, Home Assistant updates the local coordinator immediately and refreshes the complete list in the background.
+- The dashboard card keeps a per-product pending quantity and serialises rapid +/- clicks, so repeated taps are not ignored while a previous write is in flight.
