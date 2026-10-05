@@ -1,4 +1,4 @@
-# AH Shopping 0.1.7 – test report
+# AH Shopping 0.1.8 – test report
 
 Verified locally on the MVP source tree:
 
@@ -17,6 +17,5 @@ Not claimed as tested yet:
 
 - Physical camera behavior in Fully Kiosk on the Lenovo Tab M10
 - Physical camera behavior in the iPhone Home Assistant app/Safari
-- Exact checkout-equivalent total for multi-buy Bonus promotions
 
 Those need the first installation on real Home Assistant hardware/account and are the intended next MVP validation step.
