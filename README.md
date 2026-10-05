@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.7
+## MVP 0.1.8
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -97,3 +97,11 @@ The MVP scanner intentionally supports grocery-style **EAN-13 and EAN-8** only. 
 
 - Fixes list totals when AH returns prices as nested money objects such as `{"amount": 1.10}`.
 - Supports doubly nested money values used by some AH API responses.
+
+
+### 0.1.8
+
+- Uses the shopping-list product payload and product-detail endpoint as fallbacks when AH omits unavailable products from bulk product lookup.
+- Calculates supported multi-buy Bonus savings, including `2e halve prijs`.
+- Adds a Bonus savings sensor.
+- Regression-tested against a real list where €32.02 subtotal minus €2.89 Bonus equals the AH app total of €29.13.
