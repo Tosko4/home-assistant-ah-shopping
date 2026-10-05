@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.9
+## MVP 0.1.10
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -39,8 +39,29 @@ Optionally specify the list sensor explicitly:
 
 ```yaml
 type: custom:ah-shopping-card
-entity: sensor.ah_shopping_list
+entity: sensor.albert_heijn_shopping_list
 title: Boodschappen
+```
+
+### Fixed-height list with scrolling
+
+Set `height` in pixels. The header and search controls stay visible while the shopping list itself scrolls.
+
+```yaml
+type: custom:ah-shopping-card
+entity: sensor.albert_heijn_shopping_list
+title: Boodschappen
+height: 500
+```
+
+### Scan button only
+
+Use `mode: scan_only` for a compact card that only opens the barcode scanner.
+
+```yaml
+type: custom:ah-shopping-card
+mode: scan_only
+scan_label: Scan product
 ```
 
 ### Test barcode
@@ -114,3 +135,11 @@ The MVP scanner intentionally supports grocery-style **EAN-13 and EAN-8** only. 
 - Shows live scanner diagnostics including decoder mode and scanned frame count.
 - Requests a higher camera resolution for improved barcode recognition.
 - Adds a frontend cache-buster so Fully Kiosk/Home Assistant does not keep an older scanner script after updating.
+
+
+### 0.1.10
+
+- Adds `mode: scan_only` for a compact scanner-only dashboard card.
+- Adds configurable `height` in pixels for the full card.
+- When a fixed height is configured, the product list scrolls internally while the header/search controls remain visible.
+- Adds optional `scan_label` for the scanner-only button.
