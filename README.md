@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.9
+## 0.2.10
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -309,3 +309,15 @@ Writes for the same product are serialized inside the integration. Explicit abso
 
 - Uses the **front camera by default** when opening the barcode scanner.
 - The front/back camera switch remains available.
+
+
+### 0.2.10
+
+- Optimises barcode scanning for Android/Fully Kiosk tablets.
+- Uses **ZXing as the primary decoder on Android** instead of relying on the slower native BarcodeDetector first.
+- Scans only the small barcode guide area instead of processing the complete camera frame.
+- Downscales the scan crop before decoding to reduce CPU load and latency.
+- Uses cropped Native BarcodeDetector as a secondary fallback and the bundled local EAN decoder as the final fallback.
+- Requests a lower-latency 1280×720 / 30 fps camera stream instead of processing 1920×1080 frames.
+- Applies continuous autofocus, exposure and white-balance constraints when the Android camera/WebView exposes those capabilities.
+- Reduces the scan loop delay from 140 ms to 90 ms.
