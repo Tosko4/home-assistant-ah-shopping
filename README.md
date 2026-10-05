@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.8
+## MVP 0.1.9
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -105,3 +105,12 @@ The MVP scanner intentionally supports grocery-style **EAN-13 and EAN-8** only. 
 - Calculates supported multi-buy Bonus savings, including `2e halve prijs`.
 - Adds a Bonus savings sensor.
 - Regression-tested against a real list where €32.02 subtotal minus €2.89 Bonus equals the AH app total of €29.13.
+
+
+### 0.1.9
+
+- Uses the browser/WebView native `BarcodeDetector` for EAN/UPC scanning when available.
+- Falls back to the bundled local EAN decoder when native detection is unavailable.
+- Shows live scanner diagnostics including decoder mode and scanned frame count.
+- Requests a higher camera resolution for improved barcode recognition.
+- Adds a frontend cache-buster so Fully Kiosk/Home Assistant does not keep an older scanner script after updating.
