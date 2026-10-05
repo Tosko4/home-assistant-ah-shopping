@@ -19,6 +19,10 @@ from .const import (
     CONF_EXPIRES_AT,
     CONF_MEMBER_ID,
     CONF_REFRESH_TOKEN,
+    CONF_UPDATE_INTERVAL_MINUTES,
+    DEFAULT_UPDATE_INTERVAL_MINUTES,
+    MAX_UPDATE_INTERVAL_MINUTES,
+    MIN_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
     NAME,
 )
@@ -47,6 +51,12 @@ class AhShoppingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle the Albert Heijn Shopping config flow."""
 
     VERSION = 1
+
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        return AhShoppingOptionsFlow()
 
     async def _exchange(self, value: str) -> dict[str, Any]:
         """Exchange the code and verify the authenticated GraphQL connection."""
@@ -133,4 +143,39 @@ class AhShoppingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=_schema(),
             errors=errors,
             description_placeholders={"login_url": AhShoppingApiClient.login_url()},
+        )
+
+
+
+class AhShoppingOptionsFlow(config_entries.OptionsFlow):
+    """Configure shopping-list polling."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current = int(
+            self.config_entry.options.get(
+                CONF_UPDATE_INTERVAL_MINUTES,
+                DEFAULT_UPDATE_INTERVAL_MINUTES,
+            )
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_UPDATE_INTERVAL_MINUTES,
+                        default=current,
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(
+                            min=MIN_UPDATE_INTERVAL_MINUTES,
+                            max=MAX_UPDATE_INTERVAL_MINUTES,
+                        ),
+                    )
+                }
+            ),
         )
