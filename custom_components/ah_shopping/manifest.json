@@ -10,10 +10,9 @@
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "0.2.10",
+  "version": "0.2.11",
   "dependencies": [
     "frontend",
     "http"
   ]
 }
-
