@@ -17,7 +17,7 @@ from .const import (
     TOKEN_REFRESH_MARGIN, USER_AGENT,
 )
 from .exceptions import AhAuthError, AhNotFoundError, AhRequestError, AhTransientError
-from .models import ActiveCartData, NextOrderData, NextOrderItem, Product, ShoppingItem, ShoppingListData
+from .models import NextOrderData, NextOrderItem, Product, ShoppingItem, ShoppingListData
 
 TokenUpdateCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -327,98 +327,6 @@ class AhShoppingApiClient:
             items=tuple(items),
         )
 
-    async def async_set_cart_product_quantity(
-        self,
-        product_id: int,
-        quantity: int,
-        *,
-        description: str = "",
-    ) -> None:
-        """Set an absolute quantity in the current active AH cart."""
-        item = {
-            "productId": int(product_id),
-            "quantity": max(0, int(quantity)),
-            "originCode": "PRD",
-            "description": description,
-            "strikethrough": False,
-        }
-        await self._raw_request(
-            "PUT",
-            "/mobile-services/order/v1/items?sortBy=DEFAULT",
-            json_body={"items": [item]},
-        )
-
-    async def async_get_active_cart(self) -> ActiveCartData:
-        """Return the current active AH cart/order summary."""
-        try:
-            raw = await self._raw_request(
-                "GET", "/mobile-services/order/v1/summaries/active?sortBy=DEFAULT"
-            )
-        except AhNotFoundError:
-            return ActiveCartData()
-
-        if not isinstance(raw, dict):
-            return ActiveCartData()
-
-        ordered = raw.get("orderedProducts") or []
-        if not isinstance(ordered, list):
-            ordered = []
-
-        product_ids: list[int] = []
-        for row in ordered:
-            if not isinstance(row, dict):
-                continue
-            product = row.get("product") or {}
-            if not isinstance(product, dict):
-                continue
-            product_id = int(product.get("webshopId") or product.get("id") or 0)
-            if product_id > 0:
-                product_ids.append(product_id)
-
-        catalogue = {
-            product.id: product
-            for product in await self.async_get_products(list(dict.fromkeys(product_ids)))
-        }
-
-        items: list[NextOrderItem] = []
-        for row in ordered:
-            if not isinstance(row, dict):
-                continue
-            product_raw = row.get("product") or {}
-            if not isinstance(product_raw, dict):
-                continue
-            product_id = int(product_raw.get("webshopId") or product_raw.get("id") or 0)
-            quantity = max(0, int(row.get("quantity") or row.get("amount") or 0))
-            embedded = Product.from_api(product_raw)
-            product = catalogue.get(product_id) or embedded
-            items.append(
-                NextOrderItem(
-                    product_id=product_id,
-                    title=product.title or str(product_raw.get("title") or ""),
-                    quantity=quantity,
-                    brand=product.brand,
-                    unit_size=product.unit_size,
-                    price_now=product.price_now,
-                    price_was=product.price_was,
-                    is_bonus=product.is_bonus,
-                    bonus_mechanism=product.bonus_mechanism,
-                    image_url=product.image_url,
-                )
-            )
-
-        total = raw.get("totalPrice") or {}
-        if not isinstance(total, dict):
-            total = {}
-
-        return ActiveCartData(
-            order_id=int(raw.get("id") or 0),
-            state=str(raw.get("state") or ""),
-            shopping_type=str(raw.get("shoppingType") or ""),
-            total_price=float(total.get("priceTotalPayable") or 0.0),
-            total_discount=float(total.get("priceDiscount") or 0.0),
-            items=tuple(items),
-        )
-
     async def async_get_list_payload(self) -> dict[str, Any]:
         data = await self._raw_request("GET", SHOPPINGLIST_ITEMS_READ_PATH)
         if not isinstance(data, dict):
@@ -646,6 +554,6 @@ class AhShoppingApiClient:
 
         return ShoppingListData(
             list_id=str(data.get("id") or "my-list"),
-            name="Boodschappenlijst",
+            name="Winkelmandje",
             items=items,
         )
