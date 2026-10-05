@@ -2,7 +2,7 @@ import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
   constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map();}
-  static getStubConfig(){return {title:'Boodschappen',show_header:true,show_scan:true,show_products:true};}
+  static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list'};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
     {name:'title',selector:{text:{}}},
@@ -21,7 +21,6 @@ class AhShoppingCard extends HTMLElement {
   setConfig(config){
     const legacyScanOnly=config.mode==='scan_only';
     this._config={
-      title:'Boodschappen',
       show_header:legacyScanOnly?false:true,
       show_scan:true,
       show_products:legacyScanOnly?false:true,
@@ -126,7 +125,7 @@ class AhShoppingCard extends HTMLElement {
     const view=this._viewData();
     const entity=view.entity;
     const items=view.items||[];
-    const title=this._config.title||'Boodschappen';
+    const title=this._config.title||view.label;
     const showHeader=this._config.show_header!==false;
     const showScan=this._config.show_scan!==false;
     const showProducts=this._config.show_products!==false;
