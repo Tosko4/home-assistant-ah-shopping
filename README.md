@@ -1,10 +1,12 @@
-# AH Shopping
+# Albert Heijn Shopping
+
+<p align="center"><img src="brand/logo.png" width="128" alt="Albert Heijn logo"></p>
 
 Home Assistant custom integration for managing the **Albert Heijn shopping list** from Home Assistant, including a bundled camera barcode-scanner card.
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.0
+## MVP 0.1.2
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -20,7 +22,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 ## Installation
 
-Add `https://github.com/digital-IMEI/home-assistant-ah-shopping` as a HACS custom repository, category **Integration**, install **AH Shopping**, restart Home Assistant, then add the integration under **Settings → Devices & services**.
+Add `https://github.com/digital-IMEI/home-assistant-ah-shopping` as a HACS custom repository, category **Integration**, install **Albert Heijn Shopping**, restart Home Assistant, then add the integration under **Settings → Devices & services**.
 
 The setup flow opens the AH login page. Sign in and paste the returned `appie://...code=...` URL (or just the code) into Home Assistant.
 

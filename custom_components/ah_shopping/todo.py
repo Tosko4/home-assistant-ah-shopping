@@ -1,4 +1,4 @@
-"""Read-only native To-do representation for AH Shopping MVP."""
+"""Read-only native To-do representation for Albert Heijn Shopping MVP."""
 from __future__ import annotations
 from homeassistant.components.todo import TodoItem, TodoItemStatus, TodoListEntity
 from homeassistant.core import HomeAssistant
@@ -11,7 +11,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AhShoppingConfigEntry, a
 
 class AhShoppingTodo(AhShoppingEntity, TodoListEntity):
     """Expose the AH list to native HA views; mutations use the richer card in v0.1."""
-    _attr_name = "AH Shopping List"
+    _attr_name = "Albert Heijn Shopping List"
     _attr_icon = "mdi:cart-check"
     def __init__(self, coordinator):
         super().__init__(coordinator)

@@ -3,9 +3,12 @@
     "step": {
       "user": {
         "title": "Albert Heijn koppelen",
-        "description": "Open {login_url}, log in en plak de teruggegeven appie://-URL of autorisatiecode.",
+        "description": "Open deze Albert Heijn-login-URL in je browser: {login_url}\\n\\nLog in bij Albert Heijn. Wanneer de browser doorstuurt naar appie://login-exit, kopieer je de authorization code of volledige redirect-URL en plak je die hieronder. Authorization codes zijn eenmalig; vraag bij iedere poging een nieuwe code op.",
         "data": {
-          "authorization_code": "Autorisatiecode of callback-URL"
+          "authorization_code": "Authorization code of redirect-URL"
+        },
+        "data_description": {
+          "authorization_code": "Plak de waarde van de code-parameter of de volledige appie://login-exit?... URL."
         }
       },
       "reauth_confirm": {
@@ -17,12 +20,13 @@
       }
     },
     "error": {
-      "invalid_auth": "Authenticatie mislukt",
-      "cannot_connect": "Kan geen verbinding maken met Albert Heijn"
+      "invalid_auth": "Albert Heijn accepteert deze authorization code niet. Vraag een nieuwe code op en probeer opnieuw.",
+      "cannot_connect": "Kan geen verbinding maken met de Albert Heijn-boodschappenlijst-API. Bekijk het Home Assistant-logboek voor de exacte API-fout."
     },
     "abort": {
       "already_configured": "Dit AH-account is al geconfigureerd",
       "reauth_successful": "Opnieuw koppelen gelukt"
     }
-  }
+  },
+  "title": "Albert Heijn Shopping"
 }

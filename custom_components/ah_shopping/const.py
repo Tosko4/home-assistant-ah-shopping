@@ -1,9 +1,9 @@
-"""Constants for AH Shopping."""
+"""Constants for Albert Heijn Shopping."""
 from datetime import timedelta
 from homeassistant.const import Platform
 
 DOMAIN = "ah_shopping"
-NAME = "AH Shopping"
+NAME = "Albert Heijn Shopping"
 PLATFORMS = [Platform.SENSOR, Platform.TODO]
 
 API_BASE_URL = "https://api.ah.nl"

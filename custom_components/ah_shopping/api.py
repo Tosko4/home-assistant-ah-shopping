@@ -142,11 +142,16 @@ class AhShoppingApiClient:
 
     async def exchange_authorization_code(self, value: str) -> dict[str, Any]:
         code = self.extract_authorization_code(value)
-        payload = await self._raw_request(
-            "POST", "/mobile-auth/v1/auth/token",
-            json_body={"clientId": CLIENT_ID, "code": code},
-            authenticated=False,
-        )
+        try:
+            payload = await self._raw_request(
+                "POST", "/mobile-auth/v1/auth/token",
+                json_body={"clientId": CLIENT_ID, "code": code},
+                authenticated=False,
+            )
+        except AhRequestError as err:
+            raise AhAuthError(
+                f"Albert Heijn rejected the authorization code: {err}"
+            ) from err
         if not isinstance(payload, dict):
             raise AhAuthError("Unexpected token response")
         await self._accept_token_payload(payload)
@@ -158,12 +163,17 @@ class AhShoppingApiClient:
         async with self._refresh_lock:
             if self._token_is_fresh():
                 return
-            payload = await self._raw_request(
-                "POST", "/mobile-auth/v1/auth/token/refresh",
-                json_body={"clientId": CLIENT_ID, "refreshToken": self._refresh_token},
-                authenticated=False,
-                allow_refresh=False,
-            )
+            try:
+                payload = await self._raw_request(
+                    "POST", "/mobile-auth/v1/auth/token/refresh",
+                    json_body={"clientId": CLIENT_ID, "refreshToken": self._refresh_token},
+                    authenticated=False,
+                    allow_refresh=False,
+                )
+            except AhRequestError as err:
+                raise AhAuthError(
+                    f"Albert Heijn rejected the refresh token: {err}"
+                ) from err
             if not isinstance(payload, dict):
                 raise AhAuthError("Unexpected refresh response")
             await self._accept_token_payload(payload)
@@ -241,10 +251,10 @@ class AhShoppingApiClient:
         return data
 
     async def async_validate_connection(self) -> None:
-        await self._graphql(_MEMBER_QUERY)
-        lists = await self.async_get_lists()
-        if not lists:
-            raise AhRequestError("No AH shopping list found for this account")
+        # Validate only the shopping-list endpoint the integration actually needs.
+        # The previous extra member GraphQL probe could reject a valid login even
+        # though shopping-list access itself was working.
+        await self.async_get_lists()
 
     async def async_get_lists(self) -> list[dict[str, Any]]:
         result = await self._raw_request("GET", "/mobile-services/lists/v3/lists?productId=1")

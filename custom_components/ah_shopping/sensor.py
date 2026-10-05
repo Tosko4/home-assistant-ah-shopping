@@ -1,4 +1,4 @@
-"""Sensors for AH Shopping."""
+"""Sensors for Albert Heijn Shopping."""
 from __future__ import annotations
 from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
@@ -13,7 +13,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AhShoppingConfigEntry, a
     async_add_entities([AhShoppingListSensor(coordinator), AhShoppingTotalSensor(coordinator)])
 
 class AhShoppingListSensor(AhShoppingEntity, SensorEntity):
-    _attr_name = "AH Shopping List"
+    _attr_name = "Albert Heijn Shopping List"
     _attr_icon = "mdi:cart-outline"
     def __init__(self, coordinator):
         super().__init__(coordinator)
@@ -29,7 +29,7 @@ class AhShoppingListSensor(AhShoppingEntity, SensorEntity):
         return data
 
 class AhShoppingTotalSensor(AhShoppingEntity, SensorEntity):
-    _attr_name = "AH Shopping Estimated Total"
+    _attr_name = "Albert Heijn Shopping Estimated Total"
     _attr_icon = "mdi:currency-eur"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_native_unit_of_measurement = CURRENCY_EURO
