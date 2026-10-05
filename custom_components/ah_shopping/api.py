@@ -17,7 +17,7 @@ from .const import (
     TOKEN_REFRESH_MARGIN, USER_AGENT,
 )
 from .exceptions import AhAuthError, AhNotFoundError, AhRequestError, AhTransientError
-from .models import NextOrderData, NextOrderItem, Product, ShoppingItem, ShoppingListData
+from .models import ActiveCartData, NextOrderData, NextOrderItem, Product, ShoppingItem, ShoppingListData
 
 TokenUpdateCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -290,6 +290,7 @@ class AhShoppingApiClient:
                     if current <= 0:
                         current = before
                     quantity = max(0, int(raw.get("quantity") or raw.get("amount") or 0))
+                    parsed_product = Product.from_api(product)
                     items.append(
                         NextOrderItem(
                             product_id=int(product.get("webshopId") or product.get("id") or 0),
@@ -302,6 +303,7 @@ class AhShoppingApiClient:
                             is_bonus=bool(product.get("isBonus")),
                             bonus_mechanism=str(product.get("bonusMechanism") or ""),
                             taxonomy=taxonomy,
+                            image_url=parsed_product.image_url,
                         )
                     )
 
@@ -322,6 +324,77 @@ class AhShoppingApiClient:
             delivery_start_time=str(slot.get("startTime") or ""),
             delivery_end_time=str(slot.get("endTime") or ""),
             total_price=total_price,
+            items=tuple(items),
+        )
+
+    async def async_get_active_cart(self) -> ActiveCartData:
+        """Return the current active AH cart/order summary."""
+        try:
+            raw = await self._raw_request(
+                "GET", "/mobile-services/order/v1/summaries/active?sortBy=DEFAULT"
+            )
+        except AhNotFoundError:
+            return ActiveCartData()
+
+        if not isinstance(raw, dict):
+            return ActiveCartData()
+
+        ordered = raw.get("orderedProducts") or []
+        if not isinstance(ordered, list):
+            ordered = []
+
+        product_ids: list[int] = []
+        for row in ordered:
+            if not isinstance(row, dict):
+                continue
+            product = row.get("product") or {}
+            if not isinstance(product, dict):
+                continue
+            product_id = int(product.get("webshopId") or product.get("id") or 0)
+            if product_id > 0:
+                product_ids.append(product_id)
+
+        catalogue = {
+            product.id: product
+            for product in await self.async_get_products(list(dict.fromkeys(product_ids)))
+        }
+
+        items: list[NextOrderItem] = []
+        for row in ordered:
+            if not isinstance(row, dict):
+                continue
+            product_raw = row.get("product") or {}
+            if not isinstance(product_raw, dict):
+                continue
+            product_id = int(product_raw.get("webshopId") or product_raw.get("id") or 0)
+            quantity = max(0, int(row.get("quantity") or row.get("amount") or 0))
+            embedded = Product.from_api(product_raw)
+            product = catalogue.get(product_id) or embedded
+            items.append(
+                NextOrderItem(
+                    product_id=product_id,
+                    title=product.title or str(product_raw.get("title") or ""),
+                    quantity=quantity,
+                    brand=product.brand,
+                    unit_size=product.unit_size,
+                    price_now=product.price_now,
+                    price_was=product.price_was,
+                    is_bonus=product.is_bonus,
+                    bonus_mechanism=product.bonus_mechanism,
+                    image_url=product.image_url,
+                )
+            )
+
+        total = raw.get("totalPrice") or {}
+        if not isinstance(total, dict):
+            total = {}
+
+        return ActiveCartData(
+            order_id=int(raw.get("id") or 0),
+            state=str(raw.get("state") or ""),
+            shopping_type=str(raw.get("shoppingType") or ""),
+            total_price=float(total.get("priceTotalPayable") or 0.0),
+            total_discount=float(total.get("priceDiscount") or 0.0),
             items=tuple(items),
         )
 
