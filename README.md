@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.3
+## 0.2.4
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -73,7 +73,7 @@ product_source: next_order      # eerstvolgende ingeplande bestelling
 product_source: cart_and_order  # winkelmandje + volgende bestelling
 ```
 
-The combined view merges identical products by product id and adds their quantities. Order/cart views are read-only in the card; +/- remains available only for the AH shopping list. The barcode scanner always adds to the AH shopping list.
+The combined view merges identical products by product id and adds their quantities. The active cart is editable with +/- and remove controls. The next scheduled order and the combined cart/order view remain read-only. The barcode scanner always adds to the AH shopping list.
 
 For a scanner-only card:
 
@@ -246,3 +246,15 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Cart/order product views are intentionally read-only; +/- remains limited to the shopping list.
 - The scanner continues to add products to the shopping list regardless of the displayed product source.
 - Card title defaults to the selected product source unless a custom title is configured.
+
+
+### 0.2.4
+
+- Makes `product_source: cart` editable from the dashboard card.
+- Adds +/- quantity controls and remove for active cart products.
+- Writes cart changes through `PUT /mobile-services/order/v1/items?sortBy=DEFAULT`.
+- Applies successful cart changes immediately in Home Assistant and reconciles with AH after about 1 second.
+- Protects recent cart writes from stale AH responses for up to 20 seconds, matching the shopping-list conflict strategy.
+- Adds `ah_shopping.set_cart_quantity` and `ah_shopping.remove_cart_product` services.
+- Keeps `product_source: next_order` and `product_source: cart_and_order` read-only.
+- Cart total price remains the last AH-calculated total while a quantity write is pending; AH recalculates it on the reconciliation refresh.
