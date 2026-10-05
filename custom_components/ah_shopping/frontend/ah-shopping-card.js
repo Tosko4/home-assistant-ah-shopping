@@ -1,7 +1,7 @@
 import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._scanCountdownTimer=null; this._scanDeadline=0; this._facing='user'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map();}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._scanCountdownTimer=null; this._scanDeadline=0; this._facing='user'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map();}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list'};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
@@ -329,18 +329,51 @@ class AhShoppingCard extends HTMLElement {
     this._scanBusy=false;
     const video=this._scanner.querySelector('video'),status=this._scanner.querySelector('#scanstatus');
     try{
-      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:this._facing},width:{ideal:1920},height:{ideal:1080}},audio:false});
+      const stream=await navigator.mediaDevices.getUserMedia({
+        video:{
+          facingMode:{ideal:this._facing},
+          width:{ideal:1280},
+          height:{ideal:720},
+          frameRate:{ideal:30,max:30}
+        },
+        audio:false
+      });
       this._stream=stream;
+      const track=stream.getVideoTracks()[0];
+      await this._tuneCameraTrack(track);
       video.srcObject=stream;
       await video.play();
       this._scanCanvas=document.createElement('canvas');
       await this._initScannerEngine();
-      const label=this._decoderMode==='native'?'native':this._decoderMode==='zxing'?'ZXing':'lokale fallback';
-      status.textContent=`${this._facing==='environment'?'Achtercamera':'Frontcamera'} · scanner: ${label} · zoeken…`;
-      if(this._decoderMode==='zxing')this._startZXing(video);
-      else this._scheduleScan();
+
+      const settings=track?.getSettings?.()||{};
+      const resolution=settings.width&&settings.height?` · ${settings.width}×${settings.height}`:'';
+      const label=this._decoderMode==='native'?'Native':this._decoderMode==='zxing'?'ZXing':'lokale fallback';
+      this._cameraInfo=`${this._facing==='environment'?'Achtercamera':'Frontcamera'} · ${label}${resolution}`;
+      status.textContent=`${this._cameraInfo} · zoeken…`;
+      this._scheduleScan();
     }catch(e){
       status.textContent=`Camera kon niet openen: ${e.message||e}`;
+    }
+  }
+
+  async _tuneCameraTrack(track){
+    if(!track?.getCapabilities||!track?.applyConstraints)return;
+    try{
+      const caps=track.getCapabilities()||{};
+      const advanced=[];
+      if(Array.isArray(caps.focusMode)&&caps.focusMode.includes('continuous')){
+        advanced.push({focusMode:'continuous'});
+      }
+      if(Array.isArray(caps.exposureMode)&&caps.exposureMode.includes('continuous')){
+        advanced.push({exposureMode:'continuous'});
+      }
+      if(Array.isArray(caps.whiteBalanceMode)&&caps.whiteBalanceMode.includes('continuous')){
+        advanced.push({whiteBalanceMode:'continuous'});
+      }
+      if(advanced.length)await track.applyConstraints({advanced});
+    }catch(e){
+      console.debug('AH Shopping: camera tuning not supported',e);
     }
   }
 
@@ -349,7 +382,34 @@ class AhShoppingCard extends HTMLElement {
     this._zxingReader=null;
     this._decoderMode='local';
 
-    if('BarcodeDetector' in window){
+    const isAndroid=/Android/i.test(navigator.userAgent||'');
+
+    const tryZXing=async()=>{
+      try{
+        await this._loadZXing();
+        if(window.ZXing?.BrowserMultiFormatReader){
+          const hints=new Map();
+          if(window.ZXing.DecodeHintType&&window.ZXing.BarcodeFormat){
+            hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,[
+              window.ZXing.BarcodeFormat.EAN_13,
+              window.ZXing.BarcodeFormat.EAN_8,
+              window.ZXing.BarcodeFormat.UPC_A,
+              window.ZXing.BarcodeFormat.UPC_E
+            ]);
+            hints.set(window.ZXing.DecodeHintType.TRY_HARDER,true);
+          }
+          this._zxingReader=new window.ZXing.BrowserMultiFormatReader(hints,80);
+          this._decoderMode='zxing';
+          return true;
+        }
+      }catch(e){
+        console.warn('AH Shopping: ZXing could not be loaded',e);
+      }
+      return false;
+    };
+
+    const tryNative=async()=>{
+      if(!('BarcodeDetector' in window))return false;
       try{
         const wanted=['ean_13','ean_8','upc_a','upc_e'];
         let formats=wanted;
@@ -360,31 +420,20 @@ class AhShoppingCard extends HTMLElement {
         if(formats.length){
           this._barcodeDetector=new window.BarcodeDetector({formats});
           this._decoderMode='native';
-          return;
+          return true;
         }
       }catch(e){}
+      return false;
+    };
+
+    if(isAndroid){
+      if(await tryZXing())return;
+      if(await tryNative())return;
+    }else{
+      if(await tryNative())return;
+      if(await tryZXing())return;
     }
 
-    try{
-      await this._loadZXing();
-      if(window.ZXing?.BrowserMultiFormatReader){
-        const hints=new Map();
-        if(window.ZXing.DecodeHintType&&window.ZXing.BarcodeFormat){
-          hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,[
-            window.ZXing.BarcodeFormat.EAN_13,
-            window.ZXing.BarcodeFormat.EAN_8,
-            window.ZXing.BarcodeFormat.UPC_A,
-            window.ZXing.BarcodeFormat.UPC_E
-          ]);
-          hints.set(window.ZXing.DecodeHintType.TRY_HARDER,true);
-        }
-        this._zxingReader=new window.ZXing.BrowserMultiFormatReader(hints,250);
-        this._decoderMode='zxing';
-        return;
-      }
-    }catch(e){
-      console.warn('AH Shopping: ZXing could not be loaded',e);
-    }
     this._decoderMode='local';
   }
 
@@ -410,72 +459,74 @@ class AhShoppingCard extends HTMLElement {
     await window.__ahShoppingZXingPromise;
   }
 
-  _startZXing(video){
-    if(!this._zxingReader)return;
-    const status=this._scanner?.querySelector('#scanstatus');
-    this._zxingTask=this._zxingReader.decodeFromVideoElementContinuously(video,(result,err)=>{
-      if(!this._scanner||!this._stream)return;
-      this._scanCount++;
-      if(result){
-        const raw=typeof result.getText==='function'?result.getText():result.text;
-        const code=String(raw||'').replace(/\D/g,'');
-        if(code)this._barcodeDetected(code);
-      }else{
-        this._noteBarcodeAbsent();
-      }
-      if(status&&this._scanCount%10===0&&!this._scanProcessing){
-        status.textContent=`ZXing actief · ${this._scanCount} frames gecontroleerd`;
-      }
-      if(err&&window.ZXing?.NotFoundException&&!(err instanceof window.ZXing.NotFoundException)){
-        console.debug('AH Shopping ZXing scan error',err);
-      }
-    }).catch(err=>{
-      console.warn('AH Shopping: ZXing scanning stopped',err);
-      if(!this._scanner||!this._stream)return;
-      this._decoderMode='local';
-      if(status)status.textContent='ZXing gestopt · lokale fallback actief';
-      this._scheduleScan();
-    });
-  }
-
-  _scheduleScan(){clearTimeout(this._scanLoop);this._scanLoop=setTimeout(()=>this._scanFrame(),140);}
+  _scheduleScan(){clearTimeout(this._scanLoop);this._scanLoop=setTimeout(()=>this._scanFrame(),90);}
 
   async _scanFrame(){
     if(!this._scanner||!this._stream||this._scanBusy)return;
     const video=this._scanner.querySelector('video');
     if(video.readyState<2||!video.videoWidth){this._scheduleScan();return;}
+
     this._scanBusy=true;
     this._scanCount++;
     const status=this._scanner.querySelector('#scanstatus');
     let code=null;
 
-    if(this._barcodeDetector){
-      try{
-        const found=await this._barcodeDetector.detect(video);
-        const hit=(found||[]).find(x=>x?.rawValue);
-        if(hit)code=String(hit.rawValue).replace(/\D/g,'');
-      }catch(e){}
-    }
-
-    if(!code){
+    try{
       const c=this._scanCanvas,ctx=c.getContext('2d',{willReadFrequently:true});
       const vw=video.videoWidth,vh=video.videoHeight;
-      const rw=Math.floor(vw*.64),rh=Math.floor(vh*.28),sx=Math.floor((vw-rw)/2),sy=Math.floor((vh-rh)/2);
-      c.width=Math.min(1200,rw);
-      c.height=Math.max(160,Math.floor(rh*c.width/rw));
+
+      // Crop only the visual scan guide. This massively reduces work on tablet WebViews.
+      const rw=Math.floor(vw*.62);
+      const rh=Math.floor(vh*.24);
+      const sx=Math.floor((vw-rw)/2);
+      const sy=Math.floor((vh-rh)/2);
+
+      const targetWidth=Math.min(800,rw);
+      c.width=Math.max(320,targetWidth);
+      c.height=Math.max(120,Math.floor(rh*c.width/rw));
       ctx.drawImage(video,sx,sy,rw,rh,0,0,c.width,c.height);
-      try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
+
+      if(this._decoderMode==='zxing'&&this._zxingReader?.decodeFromCanvas){
+        try{
+          const result=this._zxingReader.decodeFromCanvas(c);
+          const raw=typeof result?.getText==='function'?result.getText():result?.text;
+          if(raw)code=String(raw).replace(/\D/g,'');
+        }catch(e){
+          const expected=
+            (window.ZXing?.NotFoundException&&e instanceof window.ZXing.NotFoundException)||
+            (window.ZXing?.ChecksumException&&e instanceof window.ZXing.ChecksumException)||
+            (window.ZXing?.FormatException&&e instanceof window.ZXing.FormatException);
+          if(!expected)console.debug('AH Shopping ZXing crop error',e);
+        }
+      }else if(this._decoderMode==='native'&&this._barcodeDetector){
+        try{
+          const found=await this._barcodeDetector.detect(c);
+          const hit=(found||[]).find(x=>x?.rawValue);
+          if(hit)code=String(hit.rawValue).replace(/\D/g,'');
+        }catch(e){}
+      }
+
+      // Lightweight local EAN decoder is also tried on the same crop when the main engine misses.
+      if(!code){
+        try{
+          code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));
+        }catch(e){}
+      }
+    }catch(e){
+      console.debug('AH Shopping scan frame error',e);
     }
 
-    if(code&&(/^\d{8}$/.test(code)||/^\d{12,14}$/.test(code))&&(code.length===12||code.length===14||checksumOk(code))){
+    if(code&&(/^\d{8}$/.test(code)||/^\d{12,14}$/.test(code))&&
+      (code.length===12||code.length===14||checksumOk(code))){
       this._barcodeDetected(code);
     }else{
       this._noteBarcodeAbsent();
     }
 
-    if(status&&this._scanCount%8===0&&!this._scanProcessing){
-      status.textContent=`${this._decoderMode==='native'?'Native scanner':'Lokale fallback'} actief · ${this._scanCount} frames gecontroleerd`;
+    if(status&&this._scanCount%12===0&&!this._scanProcessing){
+      status.textContent=`${this._cameraInfo||'Scanner'} · ${this._scanCount} scans`;
     }
+
     this._scanBusy=false;
     this._scheduleScan();
   }
@@ -576,7 +627,7 @@ class AhShoppingCard extends HTMLElement {
     clearTimeout(this._scanLoop);
     this._scanLoop=null;
     this._scanBusy=false;
-    try{this._zxingReader?.reset();}catch(e){}
+    try{this._zxingReader?.reset?.();}catch(e){}
     this._zxingReader=null;
     this._zxingTask=null;
     if(this._stream){
