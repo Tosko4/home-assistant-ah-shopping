@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.5
+## 0.2.6
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -73,7 +73,7 @@ product_source: next_order               # eerstvolgende ingeplande bestelling, 
 product_source: shopping_list_and_order  # Winkelmandje + volgende bestelling, read-only
 ```
 
-The combined view merges identical products by product id and adds their quantities. The scanner and all add/change/remove actions write to **Winkelmandje**, which is technically AH "Mijn lijst". The scheduled order is never modified by this integration.
+The combined view merges identical products by product id but keeps the two source quantities separate. The **Winkelmandje** portion of a combined row remains editable with +/-/remove; the **Bestelling** portion is always read-only. The scanner and all editable actions write to **Winkelmandje**, which is technically AH "Mijn lijst". The scheduled order is never modified.
 
 For backwards compatibility, old `product_source: cart` cards automatically map to `shopping_list`, and old `cart_and_order` cards map to `shopping_list_and_order`.
 
@@ -273,3 +273,13 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Implements Home Assistant `getGridOptions()` so card height is controlled from the dashboard Layout panel.
 - The product list scrolls inside the Home Assistant-assigned card height.
 - Legacy `product_source: cart` and `cart_and_order` configs are migrated in the frontend to the new source names.
+
+
+### 0.2.6
+
+- Replaces the standalone scan action with Home Assistant's native `ha-button` component and fixes its spacing/alignment.
+- Adds a subtle auto-close countdown overlay inside the camera field.
+- Countdown starts at 1:00 when the scanner opens and resets to 0:05 after every successful scan.
+- Makes the combined Winkelmandje + bestelling view partially editable: only the Winkelmandje quantity can be changed; order quantity remains read-only.
+- Combined rows now retain separate Winkelmandje and Bestelling quantities even when the same product exists in both.
+- Makes combined-list rows more compact with smaller images, reduced spacing and compact source labels.
