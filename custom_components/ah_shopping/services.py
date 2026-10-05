@@ -72,8 +72,9 @@ async def _add_barcode(hass: HomeAssistant, call: ServiceCall) -> ServiceRespons
         current=rt.coordinator.data.quantity_for_product(p.id)
         new=max(1, current+call.data.get("quantity", 1))
         await rt.client.async_set_product_quantity(rt.coordinator.data.list_id, p.id, new)
-        if rt.coordinator.data.item_for_product(p.id):
-            _optimistic_quantity(rt, p.id, new)
+        rt.coordinator.async_set_updated_data(
+            rt.coordinator.data.with_product(p, new)
+        )
         _schedule_refresh(hass, rt)
         d=p.as_dict(); d["quantity_on_list"]=new
         return {"success":True, "product":d}
