@@ -62,3 +62,35 @@ SHOPPINGLIST_ITEMS_READ_PATH = f"{SHOPPINGLIST_ITEMS_PATH}?orderBy=userInput&ord
 
 FRONTEND_URL_BASE = "/ah_shopping"
 FRONTEND_MODULE_URL = f"{FRONTEND_URL_BASE}/ah-shopping-card.js?v=0.2.1"
+
+
+NEXT_ORDER_FULFILLMENTS_QUERY = """
+query OrderFulfillments {
+  orderFulfillments(status: OPEN) {
+    result {
+      orderId
+      statusCode
+      statusDescription
+      shoppingType
+      transactionCompleted
+      modifiable
+      totalPrice {
+        totalPrice {
+          amount
+        }
+      }
+      delivery {
+        status
+        method
+        slot {
+          date
+          dateDisplay
+          timeDisplay
+          startTime
+          endTime
+        }
+      }
+    }
+  }
+}
+"""
