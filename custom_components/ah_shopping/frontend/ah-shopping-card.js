@@ -1,7 +1,7 @@
 import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map();}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._scanCountdownTimer=null; this._scanDeadline=0; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map();}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list'};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
@@ -58,20 +58,37 @@ class AhShoppingCard extends HTMLElement {
   _orderEntity(){if(!this._hass)return null;return Object.values(this._hass.states).find(s=>s.attributes?.ah_next_order===true)||null;}
   _combinedItems(listItems,orderItems){
     const map=new Map();
-    for(const [source,items] of [['Winkelmandje',listItems],['Bestelling',orderItems]]){
-      for(const raw of items||[]){
-        const key=raw.product_id>0?`p:${raw.product_id}`:`t:${String(raw.title||'').toLowerCase()}`;
-        const existing=map.get(key);
-        if(existing){
-          existing.quantity=Number(existing.quantity||0)+Number(raw.quantity||0);
-          existing.source_label=existing.source_label.includes(source)?existing.source_label:`${existing.source_label} + ${source}`;
-          if(!existing.image_url&&raw.image_url)existing.image_url=raw.image_url;
-          if(!existing.price_now&&raw.price_now)existing.price_now=raw.price_now;
-        }else{
-          map.set(key,{...raw,quantity:Number(raw.quantity||0),source_label:source});
+
+    const add=(raw,source)=>{
+      const key=raw.product_id>0?`p:${raw.product_id}`:`t:${String(raw.title||'').toLowerCase()}`;
+      let item=map.get(key);
+      if(!item){
+        item={
+          ...raw,
+          quantity:0,
+          shopping_quantity:0,
+          order_quantity:0,
+          combined:true
+        };
+        map.set(key,item);
+      }else{
+        if(!item.image_url&&raw.image_url)item.image_url=raw.image_url;
+        if(!item.price_now&&raw.price_now)item.price_now=raw.price_now;
+        if(!item.unit_size&&raw.unit_size)item.unit_size=raw.unit_size;
+        if(!item.is_bonus&&raw.is_bonus){
+          item.is_bonus=raw.is_bonus;
+          item.bonus_mechanism=raw.bonus_mechanism||'';
         }
       }
-    }
+
+      const qty=Number(raw.quantity||0);
+      if(source==='shopping')item.shopping_quantity+=qty;
+      else item.order_quantity+=qty;
+      item.quantity=item.shopping_quantity+item.order_quantity;
+    };
+
+    for(const raw of listItems||[])add(raw,'shopping');
+    for(const raw of orderItems||[])add(raw,'order');
     return [...map.values()];
   }
   _viewData(){
@@ -101,7 +118,8 @@ class AhShoppingCard extends HTMLElement {
         total_price:Number(list.estimated_total||0)+Number(order.total_price||0),
         unique_items:items.length,
         label:'Winkelmandje + bestelling',
-        edit_source:null,
+        edit_source:'shopping_list',
+        combined:true,
         entity:this._entity()||this._orderEntity(),
         delivery:order.delivery_date_display||order.delivery_date||'',
         time:order.delivery_time_display||''
@@ -184,10 +202,10 @@ class AhShoppingCard extends HTMLElement {
       ? `<div class="head"><div><div class="title">${this._esc(title)}</div><div class="sub">${items.length} artikelen · ${view.total_quantity??0} stuks${syncText}</div></div><div class="total">${this._money(view.total_price||0)}<small>${this._esc(totalNote)}</small></div></div>`
       : '';
     const scan=showScan
-      ? `<div class="scanArea"><button id="scan" class="primary scanWide">▣ ${this._esc(scanLabel)}</button></div>`
+      ? `<div class="scanArea"><ha-button id="scan" class="scanWide" appearance="filled"><ha-icon icon="mdi:barcode-scan" slot="start"></ha-icon>${this._esc(scanLabel)}</ha-button></div>`
       : '';
     const products=showProducts
-      ? `<div class="items">${items.length?items.map(i=>this._item(i,view.edit_source||null)).join(''):`<div class="empty">Geen producten in ${this._esc(view.label.toLowerCase())}.</div>`}</div>`
+      ? `<div class="items">${items.length?items.map(i=>this._item(i,view.edit_source||null,view.combined===true)).join(''):`<div class="empty">Geen producten in ${this._esc(view.label.toLowerCase())}.</div>`}</div>`
       : '';
 
     this.shadowRoot.innerHTML=`<style>${this._css()}</style><ha-card class="${cardClass}">${header}${!entity&&showProducts?'<div class="empty">Deze gegevensbron is nog niet beschikbaar.</div>':''}${scan}${products}${this._message?`<div class="toast ${this._messageError?'error':''}">${this._esc(this._message)}</div>`:''}</ha-card>`;
@@ -200,7 +218,35 @@ class AhShoppingCard extends HTMLElement {
     const list=this.shadowRoot.querySelector('.items');
     if(list)list.scrollTop=this._listScrollTop;
   }
-  _item(i,editSource=null){const key=editSource?this._quantityKey(editSource,i.product_id):''; const qty=key&&this._pendingQty.has(key)?this._pendingQty.get(key):i.quantity; const bonus=i.is_bonus?`<div class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</div>`:''; const source=i.source_label?`<small>${this._esc(i.source_label)}</small>`:''; const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:''; const price=i.price_now?`<div class="price">${old}${this._money(i.price_now)}</div>`:''; const controls=editSource&&i.product_id>0?`<div class="qty"><button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${qty}">−</button><span>${qty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${qty}">+</button><button class="trash" data-remove data-source="${editSource}" data-pid="${i.product_id}">×</button></div>`:`<div class="qty"><span>${qty}×</span></div>`; return `<div class="item">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><small>${this._esc(i.unit_size||'')}</small>${price}${bonus}${source}</div>${controls}</div>`;}
+  _item(i,editSource=null,combined=false){
+    const editableQty=combined?Number(i.shopping_quantity||0):Number(i.quantity||0);
+    const key=editSource&&editableQty>0?this._quantityKey(editSource,i.product_id):'';
+    const pendingQty=key&&this._pendingQty.has(key)?this._pendingQty.get(key):editableQty;
+    const displayQty=combined?pendingQty+Number(i.order_quantity||0):(key&&this._pendingQty.has(key)?pendingQty:Number(i.quantity||0));
+    const bonus=i.is_bonus?`<span class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</span>`:'';
+    const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:'';
+    const price=i.price_now?`<span class="price">${old}${this._money(i.price_now)}</span>`:'';
+
+    if(combined){
+      const orderQty=Number(i.order_quantity||0);
+      const shoppingQty=pendingQty;
+      const meta=[
+        price,
+        shoppingQty>0?'<span class="sourceTag shopping">Winkelmandje</span>':'',
+        orderQty>0?`<span class="sourceTag order">Bestelling ${orderQty}×</span>`:'',
+        bonus
+      ].filter(Boolean).join('');
+      const controls=shoppingQty>0&&i.product_id>0
+        ? `<div class="qty compactQty"><button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${shoppingQty}">−</button><span>${shoppingQty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${shoppingQty}">+</button><button class="trash" data-remove data-source="${editSource}" data-pid="${i.product_id}">×</button></div>`
+        : `<div class="qty readonlyQty"><span>${displayQty}×</span></div>`;
+      return `<div class="item compactItem">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><div class="compactMeta">${meta}</div></div>${controls}</div>`;
+    }
+
+    const controls=editSource&&i.product_id>0
+      ? `<div class="qty"><button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}">−</button><span>${displayQty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}">+</button><button class="trash" data-remove data-source="${editSource}" data-pid="${i.product_id}">×</button></div>`
+      : `<div class="qty"><span>${displayQty}×</span></div>`;
+    return `<div class="item">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><small>${this._esc(i.unit_size||'')}</small>${price}${bonus}</div>${controls}</div>`;
+  }
   async _openScanner(){
     if(!navigator.mediaDevices?.getUserMedia){this._toast('Camera is niet beschikbaar. Gebruik HTTPS en geef cameratoegang.',true);return;}
     this._armScanAudio();
@@ -212,7 +258,7 @@ class AhShoppingCard extends HTMLElement {
 
     const modal=document.createElement('div');
     modal.className='scanner';
-    modal.innerHTML=`<style>${this._css()}</style><div class="scanbox"><div class="scanhead"><div><b>Barcode scannen</b><small>Camera maximaal 1 minuut actief</small></div><button id="close">×</button></div><div class="scanbody"><div class="scanCameraPane"><div class="videoWrap"><video playsinline muted autoplay></video><div class="guide"></div></div><div id="scanstatus">Richt de barcode horizontaal in het kader</div><div class="scanbuttons"><button id="flip">↻ Voor/achter</button><button id="cancel">Klaar</button></div></div><div id="scanresult" class="scanResult"><div class="scanPlaceholder"><span>🛒</span><b>Nog niets gescand</b><small>Een succesvol gescand product verschijnt hier.</small></div></div></div></div>`;
+    modal.innerHTML=`<style>${this._css()}</style><div class="scanbox"><div class="scanhead"><div><b>Barcode scannen</b><small>Camera maximaal 1 minuut actief</small></div><button id="close">×</button></div><div class="scanbody"><div class="scanCameraPane"><div class="videoWrap"><video playsinline muted autoplay></video><div class="guide"></div><div id="scanCountdown" class="scanCountdown">Auto sluiten · 1:00</div></div><div id="scanstatus">Richt de barcode horizontaal in het kader</div><div class="scanbuttons"><button id="flip">↻ Voor/achter</button><button id="cancel">Klaar</button></div></div><div id="scanresult" class="scanResult"><div class="scanPlaceholder"><span>🛒</span><b>Nog niets gescand</b><small>Een succesvol gescand product verschijnt hier.</small></div></div></div></div>`;
     this.shadowRoot.appendChild(modal);
     this._scanner=modal;
     modal.querySelector('#close').onclick=()=>this._closeScanner();
@@ -225,6 +271,10 @@ class AhShoppingCard extends HTMLElement {
 
   _armScannerTimeout(ms){
     clearTimeout(this._scanSessionTimer);
+    clearInterval(this._scanCountdownTimer);
+    this._scanDeadline=Date.now()+ms;
+    this._updateScanCountdown();
+    this._scanCountdownTimer=setInterval(()=>this._updateScanCountdown(),250);
     this._scanSessionTimer=setTimeout(()=>{
       if(this._scanProcessing||this._scanQueue.length){
         this._armScannerTimeout(1000);
@@ -232,6 +282,15 @@ class AhShoppingCard extends HTMLElement {
       }
       this._closeScanner();
     },ms);
+  }
+
+  _updateScanCountdown(){
+    const el=this._scanner?.querySelector('#scanCountdown');
+    if(!el||!this._scanDeadline)return;
+    const seconds=Math.max(0,Math.ceil((this._scanDeadline-Date.now())/1000));
+    const minutes=Math.floor(seconds/60);
+    const rest=String(seconds%60).padStart(2,'0');
+    el.textContent=`Auto sluiten · ${minutes}:${rest}`;
   }
 
   _armScanAudio(){
@@ -458,7 +517,7 @@ class AhShoppingCard extends HTMLElement {
         this._playScanBeep();
         if(navigator.vibrate)navigator.vibrate(70);
         this._renderScanResult();
-        if(status)status.textContent=`✓ ${p.title||code} · blijf scannen · sluit 5 sec na laatste scan`;
+        if(status)status.textContent=`✓ ${p.title||code} · blijf scannen`;
         this._armScannerTimeout(5000);
       }catch(e){
         if(status)status.textContent=e.message||String(e);
@@ -533,7 +592,10 @@ class AhShoppingCard extends HTMLElement {
 
   _closeScanner(){
     clearTimeout(this._scanSessionTimer);
+    clearInterval(this._scanCountdownTimer);
     this._scanSessionTimer=null;
+    this._scanCountdownTimer=null;
+    this._scanDeadline=0;
     this._scanQueue=[];
     this._stopCamera();
     this._scanner?.remove();
@@ -546,7 +608,7 @@ class AhShoppingCard extends HTMLElement {
 
   disconnectedCallback(){this._closeScanner();}
 
-  _css(){return `:host{display:block;height:100%}ha-card{overflow:hidden}.fullCard{height:100%;min-height:96px;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}.scanArea{padding:0 18px 14px}.scanWide{display:block;width:100%;min-height:48px;font-size:16px}.head{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 18px 12px}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.scanner{position:fixed;z-index:10000;inset:0;background:#000e;display:grid;place-items:center;padding:12px}.scanbox{width:min(1120px,100%);max-height:calc(100vh - 24px);background:var(--card-background-color);border-radius:16px;overflow:auto}.scanhead{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:18px}.scanhead button{font-size:24px}.scanbody{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.8fr);min-height:0}.scanCameraPane{min-width:0;border-right:1px solid var(--divider-color)}.videoWrap{position:relative;background:#000;aspect-ratio:4/3}.videoWrap video{width:100%;height:100%;object-fit:cover}.guide{position:absolute;left:8%;right:8%;top:35%;height:30%;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 9999px #0005}.guide:after{content:'';position:absolute;left:5%;right:5%;top:50%;height:2px;background:#f33}.scanbuttons{display:flex;gap:8px;justify-content:center;padding:12px}.scanbuttons button{min-width:130px}#scanstatus{text-align:center;padding:10px 12px 0;color:var(--secondary-text-color)}.scanResult{padding:18px;display:flex;flex-direction:column;justify-content:center}.scanPlaceholder{text-align:center;color:var(--secondary-text-color);padding:32px 10px}.scanPlaceholder span{display:block;font-size:38px;margin-bottom:8px}.scanPlaceholder b{display:block;color:var(--primary-text-color);margin-bottom:5px}.scanSuccess{font-weight:800;color:#00a03c;margin-bottom:12px}.scanProduct{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center}.scanProduct img,.scanPh{width:92px;height:92px;object-fit:contain;border-radius:12px;background:var(--secondary-background-color)}.scanPh{display:grid;place-items:center;font-size:32px}.scanProductInfo b{display:block;font-size:18px;line-height:1.25}.scanPrice{font-size:25px;font-weight:800;margin-top:7px}.scanPrice s{font-size:13px;font-weight:400;color:var(--secondary-text-color)}.scanBonus{display:inline-block;margin-top:6px;padding:3px 7px;border-radius:6px;background:#00a03c;color:#fff;font-size:11px;font-weight:800}.scanQtyRow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px;padding-top:15px;border-top:1px solid var(--divider-color)}.scanQty{display:flex;align-items:center;gap:8px}.scanQty button{width:44px;height:44px;padding:0;font-size:25px}.scanQty strong{min-width:34px;text-align:center;font-size:20px}.scanHint{margin-top:14px;line-height:1.35}.scanError{margin-bottom:10px;padding:8px 10px;border-radius:8px;background:var(--error-color,#c62828);color:#fff;font-size:12px}@media(max-width:800px){.scanbox{width:min(720px,100%)}.scanbody{grid-template-columns:1fr}.scanCameraPane{border-right:0;border-bottom:1px solid var(--divider-color)}.scanResult{min-height:210px}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
+  _css(){return `:host{display:block;height:100%}ha-card{overflow:hidden}.fullCard{height:100%;min-height:96px;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 18px 12px}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.sourceTag{font-size:10px;padding:1px 5px;border-radius:999px;background:var(--secondary-background-color);color:var(--secondary-text-color)}.sourceTag.shopping{color:var(--primary-text-color)}.sourceTag.order{opacity:.8}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.scanner{position:fixed;z-index:10000;inset:0;background:#000e;display:grid;place-items:center;padding:12px}.scanbox{width:min(1120px,100%);max-height:calc(100vh - 24px);background:var(--card-background-color);border-radius:16px;overflow:auto}.scanhead{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:18px}.scanhead button{font-size:24px}.scanbody{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.8fr);min-height:0}.scanCameraPane{min-width:0;border-right:1px solid var(--divider-color)}.videoWrap{position:relative;background:#000;aspect-ratio:4/3}.scanCountdown{position:absolute;top:10px;right:10px;z-index:3;padding:4px 7px;border-radius:999px;background:#0008;color:#fff;font-size:11px;font-weight:500;letter-spacing:.1px;backdrop-filter:blur(4px);pointer-events:none}.videoWrap video{width:100%;height:100%;object-fit:cover}.guide{position:absolute;left:8%;right:8%;top:35%;height:30%;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 9999px #0005}.guide:after{content:'';position:absolute;left:5%;right:5%;top:50%;height:2px;background:#f33}.scanbuttons{display:flex;gap:8px;justify-content:center;padding:12px}.scanbuttons button{min-width:130px}#scanstatus{text-align:center;padding:10px 12px 0;color:var(--secondary-text-color)}.scanResult{padding:18px;display:flex;flex-direction:column;justify-content:center}.scanPlaceholder{text-align:center;color:var(--secondary-text-color);padding:32px 10px}.scanPlaceholder span{display:block;font-size:38px;margin-bottom:8px}.scanPlaceholder b{display:block;color:var(--primary-text-color);margin-bottom:5px}.scanSuccess{font-weight:800;color:#00a03c;margin-bottom:12px}.scanProduct{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center}.scanProduct img,.scanPh{width:92px;height:92px;object-fit:contain;border-radius:12px;background:var(--secondary-background-color)}.scanPh{display:grid;place-items:center;font-size:32px}.scanProductInfo b{display:block;font-size:18px;line-height:1.25}.scanPrice{font-size:25px;font-weight:800;margin-top:7px}.scanPrice s{font-size:13px;font-weight:400;color:var(--secondary-text-color)}.scanBonus{display:inline-block;margin-top:6px;padding:3px 7px;border-radius:6px;background:#00a03c;color:#fff;font-size:11px;font-weight:800}.scanQtyRow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px;padding-top:15px;border-top:1px solid var(--divider-color)}.scanQty{display:flex;align-items:center;gap:8px}.scanQty button{width:44px;height:44px;padding:0;font-size:25px}.scanQty strong{min-width:34px;text-align:center;font-size:20px}.scanHint{margin-top:14px;line-height:1.35}.scanError{margin-bottom:10px;padding:8px 10px;border-radius:8px;background:var(--error-color,#c62828);color:#fff;font-size:12px}@media(max-width:800px){.scanbox{width:min(720px,100%)}.scanbody{grid-template-columns:1fr}.scanCameraPane{border-right:0;border-bottom:1px solid var(--divider-color)}.scanResult{min-height:210px}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
 }
 if(!customElements.get('ah-shopping-card'))customElements.define('ah-shopping-card',AhShoppingCard);
 window.customCards=window.customCards||[];
