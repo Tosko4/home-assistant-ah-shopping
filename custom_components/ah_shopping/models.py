@@ -83,6 +83,7 @@ class ShoppingItem:
     product_id: int
     quantity: int
     description: str = ""
+    checked: bool = False
     product: Product | None = None
 
     @property
@@ -148,6 +149,7 @@ class ShoppingItem:
             "quantity": self.quantity,
             "title": self.title,
             "description": self.description,
+            "checked": self.checked,
             "is_product": self.is_product,
             "line_total": self.line_total,
             "bonus_savings": self.bonus_savings,
@@ -226,9 +228,30 @@ class ShoppingListData:
             product_id=product.id,
             quantity=quantity,
             description=product.title,
+            checked=False,
             product=product,
         )
         return replace(self, items=(*self.items, item))
+
+    def with_item_checked(
+        self, product_id: int, description: str, checked: bool
+    ) -> "ShoppingListData":
+        """Return a copy with one matching item checked/unchecked."""
+        description_key = description.strip().casefold()
+        updated = tuple(
+            replace(item, checked=checked)
+            if (
+                (product_id > 0 and item.product_id == product_id)
+                or (
+                    product_id <= 0
+                    and item.product_id <= 0
+                    and item.description.strip().casefold() == description_key
+                )
+            )
+            else item
+            for item in self.items
+        )
+        return replace(self, items=updated)
 
     def as_dict(self) -> dict[str, Any]:
         return {
