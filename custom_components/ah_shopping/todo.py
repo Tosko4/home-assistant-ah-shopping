@@ -18,9 +18,9 @@ async def async_setup_entry(
 
 
 class AhShoppingTodo(AhShoppingEntity, TodoListEntity):
-    """Expose AH Mijn lijst as a read-only Home Assistant To-do list."""
+    """Expose AH Mijn lijst (Winkelmandje) as a read-only Home Assistant To-do list."""
 
-    _attr_name = "Albert Heijn Shopping List"
+    _attr_name = "Albert Heijn Shopping Cart"
     _attr_icon = "mdi:cart-check"
 
     def __init__(self, coordinator):
