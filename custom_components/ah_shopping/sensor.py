@@ -25,7 +25,10 @@ class AhShoppingListSensor(AhShoppingEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data.as_dict()
         data["ah_shopping_list"] = True
-        data["total_note"] = "Estimated; multi-buy promotions may not be fully reflected"
+        data["last_synced"] = self.coordinator.last_synced_at
+        data["pending_changes"] = self.coordinator.pending_change_count
+        data["update_interval_seconds"] = int(self.coordinator.update_interval.total_seconds())
+        data["total_note"] = "Total includes supported multi-buy Bonus calculations"
         return data
 
 class AhShoppingTotalSensor(AhShoppingEntity, SensorEntity):
