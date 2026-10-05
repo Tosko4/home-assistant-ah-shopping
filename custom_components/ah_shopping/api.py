@@ -335,6 +335,18 @@ class AhShoppingApiClient:
             )
         }
 
+        def product_from_list_item(
+            raw: dict[str, Any], product_id: int
+        ) -> Product | None:
+            details = raw.get("productDetails")
+            if not isinstance(details, dict):
+                return None
+            nested = details.get("product")
+            if not isinstance(nested, dict):
+                return None
+            fallback = Product.from_api(nested)
+            return fallback if fallback.id == product_id and fallback.id > 0 else None
+
         parsed_items: list[ShoppingItem] = []
         for position, raw in enumerate(raw_items):
             if not isinstance(raw, dict):
@@ -350,13 +362,20 @@ class AhShoppingApiClient:
             else:
                 item_id = f"text-{raw.get('position', position)}-{description}"
 
+            product = products.get(product_id)
+            if product is None and product_id > 0:
+                # Products that are no longer orderable can be omitted from the
+                # bulk product endpoint while still having current product data
+                # in the user's shopping-list response.
+                product = product_from_list_item(raw, product_id)
+
             parsed_items.append(
                 ShoppingItem(
                     item_id=item_id,
                     product_id=product_id,
                     quantity=quantity,
                     description=description,
-                    product=products.get(product_id),
+                    product=product,
                 )
             )
 
