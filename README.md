@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.0
+## 0.2.1
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -18,7 +18,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 - Camera barcode scanner directly inside the dashboard
 - Front/rear camera switch
 - Local EAN-13/EAN-8 decoding; UPC-A is handled as EAN-13 with a leading zero
-- Native writable `todo` entity: add free-text items, check/uncheck and delete
+- Native read-only `todo` entity for standard Home Assistant list views
 
 ## Installation
 
@@ -78,7 +78,7 @@ The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses t
 
 - `sensor.ah_shopping_list` — total item quantity; rich `items` attribute for the card
 - `sensor.ah_shopping_estimated_total` — estimated EUR total
-- `todo.ah_shopping_list` — read-only native HA view of the list in v0.1
+- `todo.ah_shopping_list` — read-only native HA view of the AH list
 
 ## Services
 
@@ -94,24 +94,22 @@ The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses t
 
 The full AH list is polled every **5 minutes by default**. The interval is configurable from the integration's **Configure** screen between 1 and 60 minutes.
 
-Writes do not wait for the next poll. After a successful AH write, Home Assistant updates immediately and schedules a reconciliation pull after about 1 second. Recent local quantity/check changes are protected for up to 20 seconds from an eventually-consistent/stale AH response. As soon as AH returns the requested value, the pending change is confirmed and cleared. If AH continues to disagree after that protection window, the AH server becomes authoritative again.
+Writes do not wait for the next poll. After a successful AH write, Home Assistant updates immediately and schedules a reconciliation pull after about 1 second. Recent local quantity changes are protected for up to 20 seconds from an eventually-consistent/stale AH response. As soon as AH returns the requested value, the pending change is confirmed and cleared. If AH continues to disagree after that protection window, the AH server becomes authoritative again.
 
 Writes for the same product are serialized inside the integration. Explicit absolute quantity changes are last-successful-write-wins when multiple clients edit the same product concurrently.
 
 ## Known limitations
 
 - AH exposes one account-wide "Mijn lijst"; multiple favorites lists are not handled by this integration.
-- Rename through the native HA To-do entity is not supported; delete and recreate the item instead.
 - Bonus totals are calculated for the supported promotion formats; unknown future AH promotion wording can still make the displayed total an estimate.
 - Barcode reliability still depends on camera focus, light and barcode size.
 
 ## Next likely steps
 
-1. Continuous scanning and duplicate-scan feedback.
-2. Multiple AH lists.
-3. Better exact Bonus total calculation.
-4. Native todo mutations and checked/picked state.
-5. Wider barcode support (Code 128 / Data Matrix) if real-world products require it.
+1. Multiple AH lists.
+2. Better exact Bonus total calculation.
+3. Optional native todo mutations if there is a clear use case.
+4. Wider barcode support (Code 128 / Data Matrix) if real-world products require it.
 
 ### 0.1.6
 
@@ -191,3 +189,14 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Serializes writes for the same product.
 - Adds configurable full polling interval (1–60 minutes, default 5).
 - Adds list diagnostics attributes: `last_synced`, `pending_changes`, and `update_interval_seconds`.
+
+
+### 0.2.1
+
+- Reverts the writable native To-do/checkbox functionality; the native To-do entity is read-only again.
+- Scanner is now a continuous session: up to 60 seconds before the first successful scan.
+- After a successful scan, the camera remains active for 5 seconds; every subsequent successful scan resets that 5-second window.
+- Keeps the camera running while barcode lookups and list writes are processed.
+- Prevents the same barcode from being selected repeatedly while it remains in view. To scan the same product again, move it out of frame briefly and present it again.
+- Shows the latest successfully scanned product in a panel to the right of the camera, including image, product name, price, Bonus information, current list quantity and +/- controls.
+- On narrow screens the scanned-product panel moves below the camera.
