@@ -83,8 +83,8 @@ class ShoppingItem:
     product_id: int
     quantity: int
     description: str = ""
-    checked: bool = False
     product: Product | None = None
+    checked: bool = False
 
     @property
     def is_product(self) -> bool:
