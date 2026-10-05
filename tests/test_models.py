@@ -149,3 +149,22 @@ def test_optimistic_scanned_product_updates_existing_item():
     assert changed.items[0].quantity == 3
     assert changed.items[0].title == "Nieuw"
     assert changed.estimated_total == 7.47
+
+
+def test_checked_item_serializes():
+    p = Product(id=1, title="Kaas", price_now=2.5)
+    item = ShoppingItem("x", 1, 1, "Kaas", p, True)
+    assert item.as_dict()["checked"] is True
+
+
+def test_checked_state_update_keeps_quantity_and_product():
+    p = Product(id=1, title="Kaas", price_now=2.5)
+    data = ShoppingListData(
+        "abc",
+        "Boodschappen",
+        (ShoppingItem("x", 1, 3, "Kaas", p, False),),
+    )
+    changed = data.with_item_checked(1, "Kaas", True)
+    assert changed.items[0].checked is True
+    assert changed.items[0].quantity == 3
+    assert changed.items[0].product == p
