@@ -61,4 +61,4 @@ SHOPPINGLIST_ITEMS_PATH = "/mobile-services/shoppinglist/v2/items"
 SHOPPINGLIST_ITEMS_READ_PATH = f"{SHOPPINGLIST_ITEMS_PATH}?orderBy=userInput&orderByParam=0"
 
 FRONTEND_URL_BASE = "/ah_shopping"
-FRONTEND_MODULE_URL = f"{FRONTEND_URL_BASE}/ah-shopping-card.js?v=0.2.0"
+FRONTEND_MODULE_URL = f"{FRONTEND_URL_BASE}/ah-shopping-card.js?v=0.2.1"
