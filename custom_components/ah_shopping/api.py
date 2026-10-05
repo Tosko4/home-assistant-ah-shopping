@@ -270,7 +270,12 @@ class AhShoppingApiClient:
         raw = await self._raw_request("GET", f"/mobile-services/product/search/v2?{params}")
         if not isinstance(raw, dict):
             return []
-        return [Product.from_api(p) for p in raw.get("products") or [] if isinstance(p, dict)]
+        products = raw.get("products") or raw.get("data") or []
+        if isinstance(products, dict):
+            products = products.get("products") or products.get("items") or []
+        if not isinstance(products, list):
+            return []
+        return [Product.from_api(p) for p in products if isinstance(p, dict)]
 
     async def async_lookup_barcode(self, barcode: str) -> Product:
         code = "".join(ch for ch in barcode if ch.isdigit())
@@ -286,23 +291,65 @@ class AhShoppingApiClient:
             raise AhNotFoundError("No AH product found for this barcode")
         return product
 
-    async def async_set_product_quantity(
-        self, list_id: str, product_id: int, quantity: int
+    async def async_write_list_item(
+        self,
+        *,
+        description: str,
+        quantity: int,
+        checked: bool,
+        product_id: int = 0,
     ) -> None:
-        # "Mijn lijst" is account-wide in shoppinglist v2; list_id is kept in the
-        # public method signature so the rest of the integration remains stable.
-        del list_id
-        item = {
-            "description": "",
-            "productId": int(product_id),
+        item: dict[str, Any] = {
+            "description": description,
             "quantity": max(0, int(quantity)),
             "type": "SHOPPABLE",
             "originCode": "PRD",
-            "searchTerm": "",
-            "strikeThrough": False,
+            "strikeThrough": bool(checked),
         }
+        if product_id > 0:
+            item["productId"] = int(product_id)
         await self._raw_request(
             "PATCH", SHOPPINGLIST_ITEMS_PATH, json_body={"items": [item]}
+        )
+
+    async def async_set_product_quantity(
+        self,
+        list_id: str,
+        product_id: int,
+        quantity: int,
+        *,
+        description: str = "",
+        checked: bool = False,
+    ) -> None:
+        del list_id
+        await self.async_write_list_item(
+            description=description,
+            quantity=quantity,
+            checked=checked,
+            product_id=product_id,
+        )
+
+    async def async_set_item_checked(self, item: ShoppingItem, checked: bool) -> None:
+        await self.async_write_list_item(
+            description=item.description,
+            quantity=item.quantity,
+            checked=checked,
+            product_id=item.product_id,
+        )
+
+    async def async_add_free_text_item(self, description: str, quantity: int = 1) -> None:
+        await self.async_write_list_item(
+            description=description.strip(),
+            quantity=quantity,
+            checked=False,
+        )
+
+    async def async_delete_list_item(self, item: ShoppingItem) -> None:
+        await self.async_write_list_item(
+            description=item.description,
+            quantity=0,
+            checked=item.checked,
+            product_id=item.product_id,
         )
 
     async def async_get_shopping_data(self) -> ShoppingListData:
@@ -398,6 +445,7 @@ class AhShoppingApiClient:
                     product_id=product_id,
                     quantity=quantity,
                     description=description,
+                    checked=bool(raw.get("strikedthrough") or raw.get("strikeThrough")),
                     product=product,
                 )
             )
