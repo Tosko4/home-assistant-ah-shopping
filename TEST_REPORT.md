@@ -1,9 +1,9 @@
-# AH Shopping 0.1.5 – test report
+# AH Shopping 0.1.6 – test report
 
 Verified locally on the MVP source tree:
 
 - `python -m compileall -q custom_components/ah_shopping` — PASS
-- `pytest -q` — PASS (`8 passed`)
+- `pytest -q` — PASS (`10 passed`)
 - JavaScript syntax check for `frontend/ean-decoder.js` — PASS
 - JavaScript syntax check for `frontend/ah-shopping-card.js` — PASS
 - JSON parse check for manifest, HACS metadata, strings and translations — PASS

@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.5
+## MVP 0.1.6
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -84,3 +84,10 @@ The MVP scanner intentionally supports grocery-style **EAN-13 and EAN-8** only. 
 3. Better exact Bonus total calculation.
 4. Native todo mutations and checked/picked state.
 5. Wider barcode support (Code 128 / Data Matrix) if real-world products require it.
+
+### 0.1.6
+
+- Fixes empty AH list parsing for the current shoppinglist v2 response.
+- Reads product IDs from nested `productDetails.product.webshopId`.
+- Keeps free-text AH list items visible instead of dropping them.
+- Uses the current `orderBy=userInput&orderByParam=0` list read URL.

@@ -13,6 +13,7 @@ from aiohttp import ClientError, ClientResponse, ClientSession
 from .const import (
     API_BASE_URL, APPLICATION, BASE_FULFILLMENTS_QUERY, CLIENT_ID,
     CLIENT_VERSION, LOGIN_BASE_URL, SHOPPINGLIST_ITEMS_PATH,
+    SHOPPINGLIST_ITEMS_READ_PATH,
     TOKEN_REFRESH_MARGIN, USER_AGENT,
 )
 from .exceptions import AhAuthError, AhNotFoundError, AhRequestError, AhTransientError
@@ -230,7 +231,7 @@ class AhShoppingApiClient:
         await self._graphql(BASE_FULFILLMENTS_QUERY)
 
     async def async_get_list_payload(self) -> dict[str, Any]:
-        data = await self._raw_request("GET", SHOPPINGLIST_ITEMS_PATH)
+        data = await self._raw_request("GET", SHOPPINGLIST_ITEMS_READ_PATH)
         if not isinstance(data, dict):
             raise AhTransientError("Unexpected AH shopping-list response")
         return data
@@ -299,10 +300,33 @@ class AhShoppingApiClient:
         if not isinstance(raw_items, list):
             raw_items = []
 
+        def product_id_from_item(raw: dict[str, Any]) -> int:
+            direct = int(raw.get("productId") or 0)
+            if direct > 0:
+                return direct
+            details = raw.get("productDetails")
+            if not isinstance(details, dict):
+                return 0
+            nested = details.get("product")
+            if not isinstance(nested, dict):
+                return 0
+            return int(nested.get("webshopId") or nested.get("id") or 0)
+
+        def description_from_item(raw: dict[str, Any]) -> str:
+            description = str(raw.get("description") or "").strip()
+            if description:
+                return description
+            details = raw.get("productDetails")
+            if isinstance(details, dict):
+                nested = details.get("product")
+                if isinstance(nested, dict):
+                    return str(nested.get("title") or "").strip()
+            return ""
+
         product_ids = [
-            int(item.get("productId") or 0)
+            product_id_from_item(item)
             for item in raw_items
-            if isinstance(item, dict) and int(item.get("productId") or 0) > 0
+            if isinstance(item, dict) and product_id_from_item(item) > 0
         ]
         products = {
             product.id: product
@@ -311,20 +335,32 @@ class AhShoppingApiClient:
             )
         }
 
-        items = tuple(
-            ShoppingItem(
-                item_id=str(
-                    raw.get("listItemId")
-                    or raw.get("id")
-                    or f"product-{int(raw.get('productId') or 0)}"
-                ),
-                product_id=int(raw.get("productId") or 0),
-                quantity=max(1, int(raw.get("quantity") or 1)),
-                product=products.get(int(raw.get("productId") or 0)),
+        parsed_items: list[ShoppingItem] = []
+        for position, raw in enumerate(raw_items):
+            if not isinstance(raw, dict):
+                continue
+            product_id = product_id_from_item(raw)
+            description = description_from_item(raw)
+            quantity = max(1, int(raw.get("quantity") or 1))
+            raw_id = raw.get("listItemId")
+            if raw_id not in (None, 0, "0"):
+                item_id = str(raw_id)
+            elif product_id > 0:
+                item_id = f"product-{product_id}"
+            else:
+                item_id = f"text-{raw.get('position', position)}-{description}"
+
+            parsed_items.append(
+                ShoppingItem(
+                    item_id=item_id,
+                    product_id=product_id,
+                    quantity=quantity,
+                    description=description,
+                    product=products.get(product_id),
+                )
             )
-            for raw in raw_items
-            if isinstance(raw, dict) and int(raw.get("productId") or 0) > 0
-        )
+
+        items = tuple(parsed_items)
 
         return ShoppingListData(
             list_id=str(data.get("id") or "my-list"),

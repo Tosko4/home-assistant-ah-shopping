@@ -54,6 +54,7 @@ query OrderFulfillments {
 # AH "Mijn lijst" is a single account-wide shopping-list v2 resource.
 # Confirmed by current implementations against the live API in 2026.
 SHOPPINGLIST_ITEMS_PATH = "/mobile-services/shoppinglist/v2/items"
+SHOPPINGLIST_ITEMS_READ_PATH = f"{SHOPPINGLIST_ITEMS_PATH}?orderBy=userInput&orderByParam=0"
 
 FRONTEND_URL_BASE = "/ah_shopping"
 FRONTEND_MODULE_URL = f"{FRONTEND_URL_BASE}/ah-shopping-card.js"

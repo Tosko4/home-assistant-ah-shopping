@@ -1,5 +1,6 @@
-"""Data models for AH Shopping."""
+"""Data models for Albert Heijn Shopping."""
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -75,11 +76,20 @@ class ShoppingItem:
     item_id: str
     product_id: int
     quantity: int
+    description: str = ""
     product: Product | None = None
 
     @property
+    def is_product(self) -> bool:
+        return self.product_id > 0
+
+    @property
     def title(self) -> str:
-        return self.product.title if self.product else f"Product {self.product_id}"
+        if self.product and self.product.title:
+            return self.product.title
+        if self.description:
+            return self.description
+        return f"Product {self.product_id}" if self.product_id else "Boodschap"
 
     @property
     def line_total(self) -> float:
@@ -91,11 +101,14 @@ class ShoppingItem:
             "product_id": self.product_id,
             "quantity": self.quantity,
             "title": self.title,
+            "description": self.description,
+            "is_product": self.is_product,
             "line_total": round(self.line_total, 2),
         }
         if self.product:
             result.update(self.product.as_dict())
             result["product_id"] = self.product_id
+            result["is_product"] = True
         return result
 
 

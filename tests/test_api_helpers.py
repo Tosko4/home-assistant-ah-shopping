@@ -3,7 +3,10 @@ import asyncio
 import pytest
 
 from custom_components.ah_shopping.api import AhShoppingApiClient
-from custom_components.ah_shopping.const import SHOPPINGLIST_ITEMS_PATH
+from custom_components.ah_shopping.const import (
+    SHOPPINGLIST_ITEMS_PATH,
+    SHOPPINGLIST_ITEMS_READ_PATH,
+)
 from custom_components.ah_shopping.exceptions import AhAuthError, AhRequestError
 
 
@@ -43,7 +46,7 @@ def test_connection_validation_matches_delivery_graphql_path():
     assert "orderFulfillments(status: OPEN)" in client.query
 
 
-def test_shopping_list_reads_v2_items_endpoint():
+def test_shopping_list_reads_current_v2_items_endpoint():
     class ListClient(AhShoppingApiClient):
         request = None
 
@@ -54,7 +57,7 @@ def test_shopping_list_reads_v2_items_endpoint():
     client = ListClient(None, access_token="token")
     data = asyncio.run(client.async_get_list_payload())
     assert data["id"] == "list-1"
-    assert client.request[0:2] == ("GET", SHOPPINGLIST_ITEMS_PATH)
+    assert client.request[0:2] == ("GET", SHOPPINGLIST_ITEMS_READ_PATH)
 
 
 def test_quantity_update_uses_v2_patch_and_zero_deletes():
@@ -75,3 +78,39 @@ def test_quantity_update_uses_v2_patch_and_zero_deletes():
     assert item["quantity"] == 0
     assert item["type"] == "SHOPPABLE"
     assert item["originCode"] == "PRD"
+
+
+def test_current_list_shape_reads_nested_product_and_text_item():
+    class ListClient(AhShoppingApiClient):
+        async def async_get_list_payload(self):
+            return {
+                "id": "my-list",
+                "items": [
+                    {
+                        "listItemId": 41,
+                        "quantity": 2,
+                        "description": "",
+                        "productDetails": {
+                            "product": {"webshopId": 482500, "title": "AH Woksaus"}
+                        },
+                    },
+                    {
+                        "listItemId": 0,
+                        "quantity": 1,
+                        "description": "bananen",
+                        "position": 9,
+                    },
+                ],
+            }
+
+        async def async_get_products(self, product_ids):
+            assert product_ids == [482500]
+            return []
+
+    data = asyncio.run(ListClient(None, access_token="token").async_get_shopping_data())
+    assert len(data.items) == 2
+    assert data.total_quantity == 3
+    assert data.items[0].product_id == 482500
+    assert data.items[0].title == "AH Woksaus"
+    assert data.items[1].product_id == 0
+    assert data.items[1].title == "bananen"
