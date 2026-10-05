@@ -94,14 +94,20 @@ async def _set_quantity(hass: HomeAssistant, call: ServiceCall) -> ServiceRespon
     try:
         async with rt.coordinator.product_lock(pid):
             item=rt.coordinator.data.item_for_product(pid)
+            product=item.product if item else None
+            if item is None and qty > 0:
+                try:
+                    product=await rt.client.async_get_product_detail(pid)
+                except AhShoppingError:
+                    product=None
             await rt.client.async_set_product_quantity(
                 rt.coordinator.data.list_id,
                 pid,
                 qty,
-                description=item.description if item else "",
+                description=item.description if item else (product.title if product else ""),
                 checked=item.checked if item else False,
             )
-            rt.coordinator.note_quantity(pid,qty,item.product if item else None)
+            rt.coordinator.note_quantity(pid,qty,product)
         return {"success":True, "product_id":pid, "quantity":qty}
     except AhShoppingError as err:
         raise HomeAssistantError(str(err)) from err
