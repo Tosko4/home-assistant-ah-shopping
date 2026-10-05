@@ -199,3 +199,30 @@ def test_active_cart_totals():
     assert cart.unique_items == 2
     assert cart.total_quantity == 3
     assert cart.as_dict()["total_price"] == 8.50
+
+
+def test_active_cart_optimistic_quantity_update():
+    from custom_components.ah_shopping.models import ActiveCartData, NextOrderItem
+
+    cart = ActiveCartData(
+        order_id=1,
+        total_price=8.50,
+        items=(NextOrderItem(10, "A", 2, price_now=1.50),),
+    )
+    changed = cart.with_product_quantity(10, 5)
+    assert cart.quantity_for_product(10) == 2
+    assert changed.quantity_for_product(10) == 5
+    assert changed.total_quantity == 5
+    assert changed.total_price == 8.50
+
+
+def test_active_cart_optimistic_zero_removes_product():
+    from custom_components.ah_shopping.models import ActiveCartData, NextOrderItem
+
+    cart = ActiveCartData(
+        order_id=1,
+        items=(NextOrderItem(10, "A", 2, price_now=1.50),),
+    )
+    changed = cart.with_product_quantity(10, 0)
+    assert changed.items == ()
+    assert changed.total_quantity == 0
