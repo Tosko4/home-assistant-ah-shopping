@@ -1,7 +1,7 @@
 import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._search=[]; this._busy=false; this._scanner=null; this._scanLoop=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false;}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._search=[]; this._busy=false; this._scanner=null; this._scanLoop=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false; this._pendingQty=new Map(); this._qtyWorkers=new Map();}
   static getStubConfig(){return {title:'Boodschappen',mode:'full'};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
@@ -20,8 +20,38 @@ class AhShoppingCard extends HTMLElement {
   _esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   _money(n){return new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'}).format(Number(n||0));}
   async _service(service,data={}){if(!this._hass)throw new Error('Home Assistant is niet beschikbaar'); const result=await this._hass.callWS({type:'call_service',domain:'ah_shopping',service,service_data:data,return_response:true}); return result?.response||{};}
-  async _change(pid,qty){if(this._busy)return; this._busy=true; try{await this._service('set_quantity',{product_id:pid,quantity:Math.max(0,qty)});}catch(e){this._toast(e.message||String(e),true);}finally{this._busy=false;}}
-  async _remove(pid){return this._change(pid,0);}
+  _adjustQuantity(pid,current,delta){
+    const base=this._pendingQty.has(pid)?this._pendingQty.get(pid):Number(current||0);
+    this._pendingQty.set(pid,Math.max(0,base+delta));
+    this._render();
+    this._queueQuantityWrite(pid);
+  }
+  _remove(pid){
+    this._pendingQty.set(pid,0);
+    this._render();
+    this._queueQuantityWrite(pid);
+  }
+  _queueQuantityWrite(pid){
+    if(this._qtyWorkers.has(pid))return;
+    const worker=(async()=>{
+      while(this._pendingQty.has(pid)){
+        const target=this._pendingQty.get(pid);
+        try{
+          await this._service('set_quantity',{product_id:pid,quantity:target});
+        }catch(e){
+          this._pendingQty.delete(pid);
+          this._toast(e.message||String(e),true);
+          break;
+        }
+        if(this._pendingQty.get(pid)===target){
+          this._pendingQty.delete(pid);
+          this._render();
+          break;
+        }
+      }
+    })().finally(()=>this._qtyWorkers.delete(pid));
+    this._qtyWorkers.set(pid,worker);
+  }
   async _searchProducts(q){this._query=q; q=q.trim(); if(q.length<2){this._search=[];this._render();return;} try{const r=await this._service('search_products',{query:q,limit:6});this._search=r.products||[];}catch(e){this._toast(e.message||String(e),true);}this._render();}
   async _addProduct(pid){if(this._busy)return;this._busy=true;try{await this._service('add_product',{product_id:pid,quantity:1});this._search=[];this._query='';this._toast('Toegevoegd');}catch(e){this._toast(e.message||String(e),true);}finally{this._busy=false;this._render();}}
   _toast(msg,error=false){this._message=msg;this._messageError=error;this._render();clearTimeout(this._msgTimer);this._msgTimer=setTimeout(()=>{this._message='';this._render();},2800);}
@@ -51,11 +81,11 @@ class AhShoppingCard extends HTMLElement {
     const q=this.shadowRoot.querySelector('#q'); if(q){let t;q.addEventListener('input',e=>{this._query=e.target.value;clearTimeout(t);t=setTimeout(()=>this._searchProducts(e.target.value),300);});}
     this.shadowRoot.querySelector('#scan')?.addEventListener('click',()=>this._openScanner());
     this.shadowRoot.querySelectorAll('[data-add]').forEach(el=>el.addEventListener('click',()=>this._addProduct(Number(el.dataset.add))));
-    this.shadowRoot.querySelectorAll('[data-minus]').forEach(el=>el.addEventListener('click',()=>this._change(Number(el.dataset.pid),Number(el.dataset.qty)-1)));
-    this.shadowRoot.querySelectorAll('[data-plus]').forEach(el=>el.addEventListener('click',()=>this._change(Number(el.dataset.pid),Number(el.dataset.qty)+1)));
+    this.shadowRoot.querySelectorAll('[data-minus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(Number(el.dataset.pid),Number(el.dataset.qty),-1)));
+    this.shadowRoot.querySelectorAll('[data-plus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(Number(el.dataset.pid),Number(el.dataset.qty),1)));
     this.shadowRoot.querySelectorAll('[data-remove]').forEach(el=>el.addEventListener('click',()=>this._remove(Number(el.dataset.pid))));
   }
-  _item(i){const bonus=i.is_bonus?`<div class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</div>`:''; const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:''; const price=i.is_product?`<div class="price">${old}${this._money(i.price_now)}</div>`:'<small>Tekstitem</small>'; const controls=i.is_product?`<div class="qty"><button data-minus data-pid="${i.product_id}" data-qty="${i.quantity}">−</button><span>${i.quantity}</span><button data-plus data-pid="${i.product_id}" data-qty="${i.quantity}">+</button><button class="trash" data-remove data-pid="${i.product_id}">×</button></div>`:`<div class="qty"><span>${i.quantity}×</span></div>`; return `<div class="item">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><small>${this._esc(i.unit_size||'')}</small>${price}${bonus}</div>${controls}</div>`;}
+  _item(i){const qty=this._pendingQty.has(i.product_id)?this._pendingQty.get(i.product_id):i.quantity; const bonus=i.is_bonus?`<div class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</div>`:''; const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:''; const price=i.is_product?`<div class="price">${old}${this._money(i.price_now)}</div>`:'<small>Tekstitem</small>'; const controls=i.is_product?`<div class="qty"><button data-minus data-pid="${i.product_id}" data-qty="${qty}">−</button><span>${qty}</span><button data-plus data-pid="${i.product_id}" data-qty="${qty}">+</button><button class="trash" data-remove data-pid="${i.product_id}">×</button></div>`:`<div class="qty"><span>${i.quantity}×</span></div>`; return `<div class="item">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><small>${this._esc(i.unit_size||'')}</small>${price}${bonus}</div>${controls}</div>`;}
   async _openScanner(){
     if(!navigator.mediaDevices?.getUserMedia){this._toast('Camera is niet beschikbaar. Gebruik HTTPS en geef cameratoegang.',true);return;}
     const modal=document.createElement('div');modal.className='scanner';modal.innerHTML=`<style>${this._css()}</style><div class="scanbox"><div class="scanhead"><b>Barcode scannen</b><button id="close">×</button></div><div class="videoWrap"><video playsinline muted autoplay></video><div class="guide"></div></div><div id="scanstatus">Richt de barcode horizontaal in het kader</div><div class="scanbuttons"><button id="flip">↻ Voor/achter</button><button id="cancel">Klaar</button></div></div>`;
