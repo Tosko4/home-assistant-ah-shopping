@@ -114,3 +114,39 @@ def test_current_list_shape_reads_nested_product_and_text_item():
     assert data.items[0].title == "AH Woksaus"
     assert data.items[1].product_id == 0
     assert data.items[1].title == "bananen"
+
+
+def test_missing_bulk_product_uses_detail_price_fallback():
+    class ListClient(AhShoppingApiClient):
+        async def async_get_list_payload(self):
+            return {
+                "id": "my-list",
+                "items": [
+                    {
+                        "quantity": 1,
+                        "productDetails": {
+                            "product": {
+                                "webshopId": 575439,
+                                "title": "MIMO Cookie dough classic chocolate chip",
+                            }
+                        },
+                    }
+                ],
+            }
+
+        async def async_get_products(self, product_ids):
+            assert product_ids == [575439]
+            return []
+
+        async def async_get_product_detail(self, product_id):
+            assert product_id == 575439
+            from custom_components.ah_shopping.models import Product
+            return Product(
+                id=575439,
+                title="MIMO Cookie dough classic chocolate chip",
+                price_now=3.99,
+            )
+
+    data = asyncio.run(ListClient(None, access_token="token").async_get_shopping_data())
+    assert data.items[0].product.price_now == 3.99
+    assert data.items[0].line_total == 3.99
