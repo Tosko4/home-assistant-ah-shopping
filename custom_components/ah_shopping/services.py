@@ -14,9 +14,6 @@ SERVICE_ADD_PRODUCT = "add_product"
 SERVICE_ADD_BARCODE = "add_barcode"
 SERVICE_SET_QUANTITY = "set_quantity"
 SERVICE_REMOVE = "remove_product"
-SERVICE_SET_CHECKED = "set_checked"
-SERVICE_ADD_TEXT = "add_text"
-SERVICE_DELETE_ITEM = "delete_item"
 SERVICE_REFRESH = "refresh"
 
 
@@ -121,41 +118,6 @@ async def _remove(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     except AhShoppingError as err:
         raise HomeAssistantError(str(err)) from err
 
-async def _set_checked(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
-    rt=_runtime(hass); item_id=str(call.data["item_id"]); checked=bool(call.data["checked"])
-    item=next((i for i in rt.coordinator.data.items if i.item_id==item_id),None)
-    if item is None:
-        raise HomeAssistantError(f"Shopping-list item {item_id} was not found")
-    try:
-        async with rt.coordinator.product_lock(f"item:{item_id}"):
-            await rt.client.async_set_item_checked(item,checked)
-            rt.coordinator.note_checked(item,checked)
-        return {"success":True,"item_id":item_id,"checked":checked}
-    except AhShoppingError as err:
-        raise HomeAssistantError(str(err)) from err
-
-async def _add_text(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
-    rt=_runtime(hass); description=str(call.data["description"]).strip()
-    if not description:
-        raise HomeAssistantError("Description cannot be empty")
-    try:
-        await rt.client.async_add_free_text_item(description,call.data.get("quantity",1))
-        await rt.coordinator.async_request_refresh()
-        return {"success":True,"description":description}
-    except AhShoppingError as err:
-        raise HomeAssistantError(str(err)) from err
-
-async def _delete_item(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
-    rt=_runtime(hass); item_id=str(call.data["item_id"])
-    item=next((i for i in rt.coordinator.data.items if i.item_id==item_id),None)
-    if item is None:
-        return {"success":True,"item_id":item_id}
-    try:
-        await rt.client.async_delete_list_item(item)
-        await rt.coordinator.async_request_refresh()
-        return {"success":True,"item_id":item_id}
-    except AhShoppingError as err:
-        raise HomeAssistantError(str(err)) from err
 
 async def _do_refresh(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     rt=_runtime(hass); await _refresh(rt); return {"success":True}
@@ -170,9 +132,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_ADD_BARCODE: (_add_barcode, vol.Schema({vol.Required("barcode"): cv.string, vol.Optional("quantity", default=1): vol.All(vol.Coerce(int), vol.Range(min=1,max=99))})),
         SERVICE_SET_QUANTITY: (_set_quantity, vol.Schema({vol.Required("product_id"): vol.Coerce(int), vol.Required("quantity"): vol.All(vol.Coerce(int), vol.Range(min=0,max=99))})),
         SERVICE_REMOVE: (_remove, vol.Schema({vol.Required("product_id"): vol.Coerce(int)})),
-        SERVICE_SET_CHECKED: (_set_checked, vol.Schema({vol.Required("item_id"): cv.string, vol.Required("checked"): cv.boolean})),
-        SERVICE_ADD_TEXT: (_add_text, vol.Schema({vol.Required("description"): cv.string, vol.Optional("quantity", default=1): vol.All(vol.Coerce(int), vol.Range(min=1,max=99))})),
-        SERVICE_DELETE_ITEM: (_delete_item, vol.Schema({vol.Required("item_id"): cv.string})),
         SERVICE_REFRESH: (_do_refresh, vol.Schema({})),
     }
     read_only = {SERVICE_SEARCH, SERVICE_LOOKUP}
@@ -189,6 +148,6 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     data=hass.data.get(DOMAIN,{})
     if not data.get("services_registered"):
         return
-    for name in (SERVICE_SEARCH,SERVICE_LOOKUP,SERVICE_ADD_PRODUCT,SERVICE_ADD_BARCODE,SERVICE_SET_QUANTITY,SERVICE_REMOVE,SERVICE_SET_CHECKED,SERVICE_ADD_TEXT,SERVICE_DELETE_ITEM,SERVICE_REFRESH):
+    for name in (SERVICE_SEARCH,SERVICE_LOOKUP,SERVICE_ADD_PRODUCT,SERVICE_ADD_BARCODE,SERVICE_SET_QUANTITY,SERVICE_REMOVE,SERVICE_REFRESH):
         hass.services.async_remove(DOMAIN,name)
     data["services_registered"] = False
