@@ -68,7 +68,7 @@ class AhShoppingCard extends HTMLElement {
     const order=this._orderEntity()?.attributes||{};
 
     if(source==='cart'){
-      return {items:cart.items||[],total_quantity:cart.total_quantity||0,total_price:cart.total_price||0,unique_items:cart.unique_items||0,label:'Winkelmandje',read_only:true,entity:this._cartEntity()};
+      return {items:cart.items||[],total_quantity:cart.total_quantity||0,total_price:cart.total_price||0,unique_items:cart.unique_items||0,label:'Winkelmandje',read_only:false,edit_source:'cart',entity:this._cartEntity(),pending_changes:cart.pending_changes||0};
     }
     if(source==='next_order'){
       return {items:order.items||[],total_quantity:order.total_quantity||0,total_price:order.total_price||0,unique_items:order.unique_items||0,label:'Volgende bestelling',read_only:true,entity:this._orderEntity(),delivery:order.delivery_date_display||order.delivery_date||'',time:order.delivery_time_display||''};
@@ -77,42 +77,47 @@ class AhShoppingCard extends HTMLElement {
       const items=this._combinedItems(cart.items||[],order.items||[]);
       return {items,total_quantity:items.reduce((sum,i)=>sum+Number(i.quantity||0),0),total_price:Number(cart.total_price||0)+Number(order.total_price||0),unique_items:items.length,label:'Winkelmandje + bestelling',read_only:true,entity:this._cartEntity()||this._orderEntity(),delivery:order.delivery_date_display||order.delivery_date||'',time:order.delivery_time_display||''};
     }
-    return {items:list.items||[],total_quantity:list.total_quantity||0,total_price:list.estimated_total||0,unique_items:list.unique_items||0,label:'Boodschappenlijst',read_only:false,entity:this._entity(),bonus_savings:list.bonus_savings||0,pending_changes:list.pending_changes||0};
+    return {items:list.items||[],total_quantity:list.total_quantity||0,total_price:list.estimated_total||0,unique_items:list.unique_items||0,label:'Boodschappenlijst',read_only:false,edit_source:'shopping_list',entity:this._entity(),bonus_savings:list.bonus_savings||0,pending_changes:list.pending_changes||0};
   }
   _esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   _money(n){return new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'}).format(Number(n||0));}
   async _service(service,data={}){if(!this._hass)throw new Error('Home Assistant is niet beschikbaar'); const result=await this._hass.callWS({type:'call_service',domain:'ah_shopping',service,service_data:data,return_response:true}); return result?.response||{};}
-  _adjustQuantity(pid,current,delta){
-    const base=this._pendingQty.has(pid)?this._pendingQty.get(pid):Number(current||0);
-    this._pendingQty.set(pid,Math.max(0,base+delta));
+  _quantityKey(source,pid){return `${source}:${pid}`;}
+  _adjustQuantity(source,pid,current,delta){
+    const key=this._quantityKey(source,pid);
+    const base=this._pendingQty.has(key)?this._pendingQty.get(key):Number(current||0);
+    this._pendingQty.set(key,Math.max(0,base+delta));
     this._render();
-    this._queueQuantityWrite(pid);
+    this._queueQuantityWrite(source,pid);
   }
-  _remove(pid){
-    this._pendingQty.set(pid,0);
+  _remove(source,pid){
+    const key=this._quantityKey(source,pid);
+    this._pendingQty.set(key,0);
     this._render();
-    this._queueQuantityWrite(pid);
+    this._queueQuantityWrite(source,pid);
   }
-  _queueQuantityWrite(pid){
-    if(this._qtyWorkers.has(pid))return;
+  _queueQuantityWrite(source,pid){
+    const key=this._quantityKey(source,pid);
+    if(this._qtyWorkers.has(key))return;
     const worker=(async()=>{
-      while(this._pendingQty.has(pid)){
-        const target=this._pendingQty.get(pid);
+      while(this._pendingQty.has(key)){
+        const target=this._pendingQty.get(key);
+        const service=source==='cart'?'set_cart_quantity':'set_quantity';
         try{
-          await this._service('set_quantity',{product_id:pid,quantity:target});
+          await this._service(service,{product_id:pid,quantity:target});
         }catch(e){
-          this._pendingQty.delete(pid);
+          this._pendingQty.delete(key);
           this._toast(e.message||String(e),true);
           break;
         }
-        if(this._pendingQty.get(pid)===target){
-          this._pendingQty.delete(pid);
+        if(this._pendingQty.get(key)===target){
+          this._pendingQty.delete(key);
           this._render();
           break;
         }
       }
-    })().finally(()=>this._qtyWorkers.delete(pid));
-    this._qtyWorkers.set(pid,worker);
+    })().finally(()=>this._qtyWorkers.delete(key));
+    this._qtyWorkers.set(key,worker);
   }
 
   _toast(msg,error=false){this._message=msg;this._messageError=error;this._render();clearTimeout(this._msgTimer);this._msgTimer=setTimeout(()=>{this._message='';this._render();},2800);}
@@ -145,20 +150,20 @@ class AhShoppingCard extends HTMLElement {
       ? `<div class="scanArea"><button id="scan" class="primary scanWide">▣ ${this._esc(scanLabel)}</button></div>`
       : '';
     const products=showProducts
-      ? `<div class="items">${items.length?items.map(i=>this._item(i,view.read_only)).join(''):`<div class="empty">Geen producten in ${this._esc(view.label.toLowerCase())}.</div>`}</div>`
+      ? `<div class="items">${items.length?items.map(i=>this._item(i,view.edit_source||null)).join(''):`<div class="empty">Geen producten in ${this._esc(view.label.toLowerCase())}.</div>`}</div>`
       : '';
 
     this.shadowRoot.innerHTML=`<style>${this._css()}</style><ha-card class="${cardClass}" style="${cardStyle}">${header}${!entity&&showProducts?'<div class="empty">Deze gegevensbron is nog niet beschikbaar.</div>':''}${scan}${products}${this._message?`<div class="toast ${this._messageError?'error':''}">${this._esc(this._message)}</div>`:''}</ha-card>`;
 
     this.shadowRoot.querySelector('#scan')?.addEventListener('click',()=>this._openScanner());
-    this.shadowRoot.querySelectorAll('[data-minus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(Number(el.dataset.pid),Number(el.dataset.qty),-1)));
-    this.shadowRoot.querySelectorAll('[data-plus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(Number(el.dataset.pid),Number(el.dataset.qty),1)));
-    this.shadowRoot.querySelectorAll('[data-remove]').forEach(el=>el.addEventListener('click',()=>this._remove(Number(el.dataset.pid))));
+    this.shadowRoot.querySelectorAll('[data-minus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(el.dataset.source,Number(el.dataset.pid),Number(el.dataset.qty),-1)));
+    this.shadowRoot.querySelectorAll('[data-plus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(el.dataset.source,Number(el.dataset.pid),Number(el.dataset.qty),1)));
+    this.shadowRoot.querySelectorAll('[data-remove]').forEach(el=>el.addEventListener('click',()=>this._remove(el.dataset.source,Number(el.dataset.pid))));
 
     const list=this.shadowRoot.querySelector('.items');
     if(list)list.scrollTop=this._listScrollTop;
   }
-  _item(i,readOnly=false){const qty=this._pendingQty.has(i.product_id)?this._pendingQty.get(i.product_id):i.quantity; const bonus=i.is_bonus?`<div class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</div>`:''; const source=i.source_label?`<small>${this._esc(i.source_label)}</small>`:''; const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:''; const price=i.price_now?`<div class="price">${old}${this._money(i.price_now)}</div>`:''; const controls=!readOnly&&i.product_id>0?`<div class="qty"><button data-minus data-pid="${i.product_id}" data-qty="${qty}">−</button><span>${qty}</span><button data-plus data-pid="${i.product_id}" data-qty="${qty}">+</button><button class="trash" data-remove data-pid="${i.product_id}">×</button></div>`:`<div class="qty"><span>${qty}×</span></div>`; return `<div class="item">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><small>${this._esc(i.unit_size||'')}</small>${price}${bonus}${source}</div>${controls}</div>`;}
+  _item(i,editSource=null){const key=editSource?this._quantityKey(editSource,i.product_id):''; const qty=key&&this._pendingQty.has(key)?this._pendingQty.get(key):i.quantity; const bonus=i.is_bonus?`<div class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</div>`:''; const source=i.source_label?`<small>${this._esc(i.source_label)}</small>`:''; const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:''; const price=i.price_now?`<div class="price">${old}${this._money(i.price_now)}</div>`:''; const controls=editSource&&i.product_id>0?`<div class="qty"><button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${qty}">−</button><span>${qty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${qty}">+</button><button class="trash" data-remove data-source="${editSource}" data-pid="${i.product_id}">×</button></div>`:`<div class="qty"><span>${qty}×</span></div>`; return `<div class="item">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><small>${this._esc(i.unit_size||'')}</small>${price}${bonus}${source}</div>${controls}</div>`;}
   async _openScanner(){
     if(!navigator.mediaDevices?.getUserMedia){this._toast('Camera is niet beschikbaar. Gebruik HTTPS en geef cameratoegang.',true);return;}
     this._armScanAudio();
