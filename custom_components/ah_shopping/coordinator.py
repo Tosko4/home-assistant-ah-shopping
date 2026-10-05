@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 import time
 
@@ -12,7 +12,11 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import AhShoppingApiClient
-from .const import NAME, UPDATE_INTERVAL
+from .const import (
+    CONF_UPDATE_INTERVAL_MINUTES,
+    DEFAULT_UPDATE_INTERVAL_MINUTES,
+    NAME,
+)
 from .exceptions import AhAuthError, AhShoppingError
 from .models import Product, ShoppingItem, ShoppingListData
 
@@ -31,7 +35,14 @@ class AhShoppingCoordinator(DataUpdateCoordinator[ShoppingListData]):
             hass,
             _LOGGER,
             name=NAME,
-            update_interval=UPDATE_INTERVAL,
+            update_interval=timedelta(
+                minutes=int(
+                    entry.options.get(
+                        CONF_UPDATE_INTERVAL_MINUTES,
+                        DEFAULT_UPDATE_INTERVAL_MINUTES,
+                    )
+                )
+            ),
             config_entry=entry,
         )
         self.client = client
