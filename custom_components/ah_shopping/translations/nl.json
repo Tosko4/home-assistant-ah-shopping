@@ -28,5 +28,19 @@
     "abort": {
       "already_configured": "Dit Albert Heijn-account is al gekoppeld."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Boodschappenlijst instellingen",
+        "description": "Stel in hoe vaak Home Assistant de AH-lijst volledig opnieuw ophaalt. Schrijfacties worden direct verwerkt en tussendoor automatisch gereconcilieerd.",
+        "data": {
+          "update_interval_minutes": "Volledige update-interval (minuten)"
+        },
+        "data_description": {
+          "update_interval_minutes": "1–60 minuten. Standaard 5."
+        }
+      }
+    }
   }
 }
