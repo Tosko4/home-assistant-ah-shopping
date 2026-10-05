@@ -275,3 +275,79 @@ class ShoppingListData:
             "estimated_total": self.estimated_total,
             "items": [item.as_dict() for item in self.items],
         }
+
+
+
+@dataclass(slots=True, frozen=True)
+class NextOrderItem:
+    product_id: int
+    title: str
+    quantity: int
+    brand: str = ""
+    unit_size: str = ""
+    price_now: float = 0.0
+    price_was: float = 0.0
+    is_bonus: bool = False
+    bonus_mechanism: str = ""
+    taxonomy: str = ""
+
+    @property
+    def line_total(self) -> float:
+        return round(self.price_now * self.quantity, 2)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "product_id": self.product_id,
+            "title": self.title,
+            "quantity": self.quantity,
+            "brand": self.brand,
+            "unit_size": self.unit_size,
+            "price_now": round(self.price_now, 2),
+            "price_was": round(self.price_was, 2),
+            "is_bonus": self.is_bonus,
+            "bonus_mechanism": self.bonus_mechanism,
+            "taxonomy": self.taxonomy,
+            "line_total": self.line_total,
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class NextOrderData:
+    order_id: int = 0
+    status: str = ""
+    shopping_type: str = ""
+    modifiable: bool = False
+    delivery_method: str = ""
+    delivery_date: str = ""
+    delivery_date_display: str = ""
+    delivery_time_display: str = ""
+    delivery_start_time: str = ""
+    delivery_end_time: str = ""
+    total_price: float = 0.0
+    items: tuple[NextOrderItem, ...] = field(default_factory=tuple)
+
+    @property
+    def total_quantity(self) -> int:
+        return sum(max(item.quantity, 0) for item in self.items)
+
+    @property
+    def unique_items(self) -> int:
+        return len(self.items)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "order_id": self.order_id,
+            "status": self.status,
+            "shopping_type": self.shopping_type,
+            "modifiable": self.modifiable,
+            "delivery_method": self.delivery_method,
+            "delivery_date": self.delivery_date,
+            "delivery_date_display": self.delivery_date_display,
+            "delivery_time_display": self.delivery_time_display,
+            "delivery_start_time": self.delivery_start_time,
+            "delivery_end_time": self.delivery_end_time,
+            "total_price": round(self.total_price, 2),
+            "total_quantity": self.total_quantity,
+            "unique_items": self.unique_items,
+            "items": [item.as_dict() for item in self.items],
+        }
