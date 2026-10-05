@@ -123,3 +123,29 @@ def test_optimistic_quantity_zero_removes_product():
     changed = data.with_product_quantity(10, 0)
     assert changed.items == ()
     assert changed.total_quantity == 0
+
+
+def test_optimistic_insert_scanned_product():
+    p = Product(id=123, title="Scanproduct", price_now=2.49)
+    data = ShoppingListData("abc", "Boodschappen", ())
+    changed = data.with_product(p, 1)
+    assert len(changed.items) == 1
+    assert changed.items[0].product_id == 123
+    assert changed.items[0].quantity == 1
+    assert changed.items[0].product == p
+    assert changed.estimated_total == 2.49
+
+
+def test_optimistic_scanned_product_updates_existing_item():
+    old = Product(id=123, title="Oud", price_now=2.00)
+    new = Product(id=123, title="Nieuw", price_now=2.49)
+    data = ShoppingListData(
+        "abc",
+        "Boodschappen",
+        (ShoppingItem("product-123", 123, 1, "Oud", old),),
+    )
+    changed = data.with_product(new, 3)
+    assert len(changed.items) == 1
+    assert changed.items[0].quantity == 3
+    assert changed.items[0].title == "Nieuw"
+    assert changed.estimated_total == 7.47
