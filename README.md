@@ -2,15 +2,16 @@
 
 <p align="center"><img src="brand/logo.png" width="128" alt="Albert Heijn logo"></p>
 
-Home Assistant custom integration for managing the **Albert Heijn shopping list** from Home Assistant, including a bundled camera barcode-scanner card.
+Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a practical shopping cart in Home Assistant, including a bundled camera barcode-scanner card and read-only visibility of the next scheduled order.
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.4
+## 0.2.5
 
 - Authenticated connection to your AH account
-- Reads the first/default AH shopping list
-- Rich list overview in Home Assistant
+- Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
+- Rich cart overview in Home Assistant
+- Reads the next scheduled AH order and its products
 - Search AH products and add them
 - Increase, decrease and remove quantities
 - Shows current price, old price, product image and Bonus text
@@ -45,16 +46,15 @@ title: Boodschappen
 
 ### Card sections
 
-The product search bar has been removed from the dashboard card. The card now has three independently configurable sections:
+The card has three independently configurable sections:
 
 ```yaml
 type: custom:ah-shopping-card
-entity: sensor.albert_heijn_shopping_list
-title: Boodschappen
+title: Winkelmandje
 show_header: true
 show_scan: true
 show_products: true
-height: 500
+product_source: shopping_list
 scan_label: Scan product
 ```
 
@@ -62,18 +62,20 @@ scan_label: Scan product
 - `show_scan`: full-width barcode scan button.
 - `show_products`: product rows.
 - `product_source`: which product set the card displays.
-- `height`: fixed card height when the product list is visible; the list scrolls internally.
+
+Card height is **not configured in pixels**. The card implements Home Assistant's grid sizing API and follows the size selected in the dashboard **Layout** panel. When the available height is smaller than the product list, the products scroll inside the card. The card only enforces a small minimum height.
 
 Available product sources:
 
 ```yaml
-product_source: shopping_list   # Mijn lijst
-product_source: cart            # actief winkelmandje
-product_source: next_order      # eerstvolgende ingeplande bestelling
-product_source: cart_and_order  # winkelmandje + volgende bestelling
+product_source: shopping_list            # Winkelmandje (AH Mijn lijst), editable
+product_source: next_order               # eerstvolgende ingeplande bestelling, read-only
+product_source: shopping_list_and_order  # Winkelmandje + volgende bestelling, read-only
 ```
 
-The combined view merges identical products by product id and adds their quantities. The active cart is editable with +/- and remove controls. The next scheduled order and the combined cart/order view remain read-only. The barcode scanner always adds to the AH shopping list.
+The combined view merges identical products by product id and adds their quantities. The scanner and all add/change/remove actions write to **Winkelmandje**, which is technically AH "Mijn lijst". The scheduled order is never modified by this integration.
+
+For backwards compatibility, old `product_source: cart` cards automatically map to `shopping_list`, and old `cart_and_order` cards map to `shopping_list_and_order`.
 
 For a scanner-only card:
 
@@ -99,12 +101,11 @@ The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses t
 
 ## Entities
 
-- `sensor.albert_heijn_shopping_list` — total shopping-list quantity; rich `items` attribute for the card
-- `sensor.albert_heijn_shopping_estimated_total` — estimated EUR total
+- AH **Winkelmandje** sensor — the existing shopping-list entity (existing installations can keep `sensor.albert_heijn_shopping_list`); state is total quantity and attributes contain all products
+- `sensor.albert_heijn_shopping_estimated_total` — estimated EUR total for Winkelmandje
 - `sensor.albert_heijn_shopping_bonus_savings` — calculated supported Bonus savings
 - `sensor.albert_heijn_next_order` — total quantity in the next scheduled AH order; attributes include order id, delivery date/time, total price, unique item count and all ordered product lines
-- `sensor.albert_heijn_shopping_cart` — total quantity in the active AH cart; attributes include cart/order id, total price, discount, unique item count and product lines
-- `todo.albert_heijn_shopping_list` — read-only native HA view of the AH list
+- native read-only To-do entity for Winkelmandje
 
 ## Services
 
@@ -126,7 +127,7 @@ Writes for the same product are serialized inside the integration. Explicit abso
 
 ## Known limitations
 
-- AH exposes one account-wide "Mijn lijst"; multiple favorites lists are not handled by this integration.
+- The editable **Winkelmandje** in this integration is AH's account-wide "Mijn lijst". Multiple favorites lists are not handled.
 - Bonus totals are calculated for the supported promotion formats; unknown future AH promotion wording can still make the displayed total an estimate.
 - Barcode reliability still depends on camera focus, light and barcode size.
 
@@ -258,3 +259,17 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Adds `ah_shopping.set_cart_quantity` and `ah_shopping.remove_cart_product` services.
 - Keeps `product_source: next_order` and `product_source: cart_and_order` read-only.
 - Cart total price remains the last AH-calculated total while a quantity write is pending; AH recalculates it on the reconciliation refresh.
+
+
+### 0.2.5
+
+- Removes the separate active-order cart source introduced in 0.2.3/0.2.4.
+- Renames AH "Mijn lijst" to **Winkelmandje** in the dashboard/UI while keeping its existing underlying integration data and unique IDs compatible.
+- Product sources are now only: Winkelmandje, Next order, and Winkelmandje + Next order.
+- Adds a combined Winkelmandje + Next order view that merges identical products and sums quantities.
+- All scanning and editable product actions continue to write to AH "Mijn lijst" (now presented as Winkelmandje).
+- Keeps the next scheduled order read-only.
+- Removes the pixel `height` option from the card editor.
+- Implements Home Assistant `getGridOptions()` so card height is controlled from the dashboard Layout panel.
+- The product list scrolls inside the Home Assistant-assigned card height.
+- Legacy `product_source: cart` and `cart_and_order` configs are migrated in the frontend to the new source names.
