@@ -15,3 +15,4 @@ async def async_register_frontend(hass: HomeAssistant) -> None:
     ])
     add_extra_js_url(hass, FRONTEND_MODULE_URL)
     data["frontend_registered"] = True
+

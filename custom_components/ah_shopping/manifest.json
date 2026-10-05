@@ -1,7 +1,9 @@
 {
   "domain": "ah_shopping",
   "name": "AH Shopping",
-  "codeowners": ["@digital-IMEI"],
+  "codeowners": [
+    "@digital-IMEI"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/digital-IMEI/home-assistant-ah-shopping",
   "issue_tracker": "https://github.com/digital-IMEI/home-assistant-ah-shopping/issues",
@@ -9,5 +11,8 @@
   "iot_class": "cloud_polling",
   "requirements": [],
   "version": "0.1.0",
-  "dependencies": ["frontend", "http"]
+  "dependencies": [
+    "frontend",
+    "http"
+  ]
 }

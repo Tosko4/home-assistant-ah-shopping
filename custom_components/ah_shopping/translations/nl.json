@@ -4,15 +4,25 @@
       "user": {
         "title": "Albert Heijn koppelen",
         "description": "Open {login_url}, log in en plak de teruggegeven appie://-URL of autorisatiecode.",
-        "data": {"authorization_code": "Autorisatiecode of callback-URL"}
+        "data": {
+          "authorization_code": "Autorisatiecode of callback-URL"
+        }
       },
       "reauth_confirm": {
         "title": "Albert Heijn opnieuw koppelen",
         "description": "Open {login_url}, log in en plak de teruggegeven appie://-URL of autorisatiecode.",
-        "data": {"authorization_code": "Autorisatiecode of callback-URL"}
+        "data": {
+          "authorization_code": "Autorisatiecode of callback-URL"
+        }
       }
     },
-    "error": {"invalid_auth": "Authenticatie mislukt", "cannot_connect": "Kan geen verbinding maken met Albert Heijn"},
-    "abort": {"already_configured": "Dit AH-account is al geconfigureerd", "reauth_successful": "Opnieuw koppelen gelukt"}
+    "error": {
+      "invalid_auth": "Authenticatie mislukt",
+      "cannot_connect": "Kan geen verbinding maken met Albert Heijn"
+    },
+    "abort": {
+      "already_configured": "Dit AH-account is al geconfigureerd",
+      "reauth_successful": "Opnieuw koppelen gelukt"
+    }
   }
 }
