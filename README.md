@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.7
+## 0.2.8
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -295,3 +295,11 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Shows a compact breakdown such as `2 besteld · 1 extra`.
 - Allows setting a positive Winkelmandje quantity for a product that exists only in the order by resolving its product details first.
 - Aligns the scanned-product panel to the top of the scanner and uses the same compact row styling as the normal product list.
+
+
+### 0.2.8
+
+- Adds a bright white fill-light panel on the left side of the screen while the **front camera** is active.
+- The fill light covers the middle third of the screen height to illuminate packaging close to the tablet camera.
+- Reduces the visible barcode guide to about 60% of the camera width and 20% of its height, encouraging a larger camera-to-product distance for better focus.
+- Aligns the bundled local decoder crop with the smaller scan guide.
