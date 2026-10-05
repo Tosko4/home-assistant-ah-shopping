@@ -107,6 +107,11 @@ def test_current_list_shape_reads_nested_product_and_text_item():
             assert product_ids == [482500]
             return []
 
+        async def async_get_product_detail(self, product_id):
+            from custom_components.ah_shopping.models import Product
+            assert product_id == 482500
+            return Product(id=482500, title="AH Woksaus")
+
     data = asyncio.run(ListClient(None, access_token="token").async_get_shopping_data())
     assert len(data.items) == 2
     assert data.total_quantity == 3
