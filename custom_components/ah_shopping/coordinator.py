@@ -18,7 +18,7 @@ from .const import (
     NAME,
 )
 from .exceptions import AhAuthError, AhShoppingError
-from .models import NextOrderData, Product, ShoppingItem, ShoppingListData
+from .models import ActiveCartData, NextOrderData, Product, ShoppingItem, ShoppingListData
 
 _LOGGER = logging.getLogger(__name__)
 _PENDING_TTL = 20.0
@@ -190,3 +190,36 @@ class AhNextOrderCoordinator(DataUpdateCoordinator[NextOrderData]):
         except AhShoppingError as err:
             _LOGGER.warning("Could not update AH next order: %s", err)
             return self.data if self.data is not None else NextOrderData()
+
+
+
+class AhActiveCartCoordinator(DataUpdateCoordinator[ActiveCartData]):
+    """Poll the current active AH cart."""
+
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, client: AhShoppingApiClient
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{NAME} active cart",
+            update_interval=timedelta(
+                minutes=int(
+                    entry.options.get(
+                        CONF_UPDATE_INTERVAL_MINUTES,
+                        DEFAULT_UPDATE_INTERVAL_MINUTES,
+                    )
+                )
+            ),
+            config_entry=entry,
+        )
+        self.client = client
+
+    async def _async_update_data(self) -> ActiveCartData:
+        try:
+            return await self.client.async_get_active_cart()
+        except AhAuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except AhShoppingError as err:
+            _LOGGER.warning("Could not update AH active cart: %s", err)
+            return self.data if self.data is not None else ActiveCartData()
