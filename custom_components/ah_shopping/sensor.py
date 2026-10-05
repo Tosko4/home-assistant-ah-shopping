@@ -106,4 +106,5 @@ class AhActiveCartSensor(AhShoppingEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data.as_dict()
         data["ah_active_cart"] = True
+        data["pending_changes"] = self.coordinator.pending_change_count
         return data
