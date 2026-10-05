@@ -226,3 +226,114 @@ def test_free_text_write_has_no_product_id():
     assert item["quantity"] == 2
     assert item["strikeThrough"] is False
     assert "productId" not in item
+
+
+def test_next_order_reads_earliest_fulfillment_products():
+    class OrderClient(AhShoppingApiClient):
+        async def _graphql(self, query, variables=None):
+            return {
+                "orderFulfillments": {
+                    "result": [
+                        {
+                            "orderId": 200,
+                            "statusDescription": "Open",
+                            "modifiable": True,
+                            "shoppingType": "DELIVERY",
+                            "totalPrice": {"totalPrice": {"amount": 18.75}},
+                            "delivery": {
+                                "method": "DELIVERY",
+                                "slot": {
+                                    "date": "2026-10-08",
+                                    "dateDisplay": "8 oktober",
+                                    "timeDisplay": "18:00 - 20:00",
+                                    "startTime": "18:00",
+                                    "endTime": "20:00",
+                                },
+                            },
+                        },
+                        {
+                            "orderId": 100,
+                            "statusDescription": "Open",
+                            "modifiable": False,
+                            "shoppingType": "DELIVERY",
+                            "totalPrice": {"totalPrice": {"amount": 12.34}},
+                            "delivery": {
+                                "method": "DELIVERY",
+                                "slot": {
+                                    "date": "2026-10-07",
+                                    "dateDisplay": "7 oktober",
+                                    "timeDisplay": "10:00 - 12:00",
+                                    "startTime": "10:00",
+                                    "endTime": "12:00",
+                                },
+                            },
+                        },
+                    ]
+                }
+            }
+
+        async def _raw_request(self, method, path, **kwargs):
+            assert method == "GET"
+            assert path == "/mobile-services/order/v1/100/details-grouped-by-taxonomy"
+            return {
+                "groupedProductsInTaxonomy": [
+                    {
+                        "taxonomyName": "Zuivel",
+                        "orderedProducts": [
+                            {
+                                "quantity": 2,
+                                "product": {
+                                    "webshopId": 42,
+                                    "title": "Melk",
+                                    "brand": "AH",
+                                    "salesUnitSize": "1 l",
+                                    "priceBeforeBonus": 1.50,
+                                    "currentPrice": 1.25,
+                                    "isBonus": True,
+                                    "bonusMechanism": "Bonus",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "taxonomyName": "Fruit",
+                        "orderedProducts": [
+                            {
+                                "quantity": 3,
+                                "product": {
+                                    "webshopId": 43,
+                                    "title": "Appels",
+                                    "priceBeforeBonus": 2.00,
+                                    "currentPrice": None,
+                                },
+                            }
+                        ],
+                    },
+                ]
+            }
+
+    order = asyncio.run(
+        OrderClient(None, access_token="token").async_get_next_order()
+    )
+    assert order.order_id == 100
+    assert order.delivery_date == "2026-10-07"
+    assert order.total_price == 12.34
+    assert order.unique_items == 2
+    assert order.total_quantity == 5
+    assert order.items[0].title == "Melk"
+    assert order.items[0].quantity == 2
+    assert order.items[0].price_now == 1.25
+    assert order.items[1].price_now == 2.00
+
+
+def test_next_order_without_fulfillment_is_empty():
+    class OrderClient(AhShoppingApiClient):
+        async def _graphql(self, query, variables=None):
+            return {"orderFulfillments": {"result": []}}
+
+    order = asyncio.run(
+        OrderClient(None, access_token="token").async_get_next_order()
+    )
+    assert order.order_id == 0
+    assert order.total_quantity == 0
+    assert order.items == ()
