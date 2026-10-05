@@ -49,31 +49,3 @@ remove_product:
       selector: {number: {mode: box}}
 refresh:
   name: Refresh list
-
-set_checked:
-  name: Check or uncheck item
-  description: Mark an AH shopping-list item as completed or active.
-  fields:
-    item_id:
-      required: true
-      selector: {text: {}}
-    checked:
-      required: true
-      selector: {boolean: {}}
-add_text:
-  name: Add text item
-  description: Add a free-text item to AH Mijn lijst.
-  fields:
-    description:
-      required: true
-      selector: {text: {}}
-    quantity:
-      default: 1
-      selector: {number: {min: 1, max: 99, mode: box}}
-delete_item:
-  name: Delete list item
-  description: Delete any AH shopping-list item by item id.
-  fields:
-    item_id:
-      required: true
-      selector: {text: {}}
