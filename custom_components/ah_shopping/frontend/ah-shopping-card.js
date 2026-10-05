@@ -1,7 +1,7 @@
 import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._search=[]; this._busy=false; this._scanner=null; this._scanLoop=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false; this._pendingQty=new Map(); this._qtyWorkers=new Map();}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._search=[]; this._busy=false; this._scanner=null; this._scanLoop=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false; this._pendingQty=new Map(); this._qtyWorkers=new Map();}
   static getStubConfig(){return {title:'Boodschappen',mode:'full'};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
@@ -103,32 +103,117 @@ class AhShoppingCard extends HTMLElement {
       video.srcObject=stream;
       await video.play();
       this._scanCanvas=document.createElement('canvas');
-      await this._initBarcodeDetector();
-      status.textContent=`${this._facing==='environment'?'Achtercamera':'Frontcamera'} · scanner: ${this._decoderMode==='native'?'native':'fallback'} · zoeken…`;
-      this._scheduleScan();
+      await this._initScannerEngine();
+      const label=this._decoderMode==='native'?'native':this._decoderMode==='zxing'?'ZXing':'lokale fallback';
+      status.textContent=`${this._facing==='environment'?'Achtercamera':'Frontcamera'} · scanner: ${label} · zoeken…`;
+      if(this._decoderMode==='zxing'){
+        this._startZXing(video);
+      }else{
+        this._scheduleScan();
+      }
     }
     catch(e){status.textContent=`Camera kon niet openen: ${e.message||e}`;}
   }
 
-  async _initBarcodeDetector(){
+  async _initScannerEngine(){
     this._barcodeDetector=null;
+    this._zxingReader=null;
     this._decoderMode='local';
-    if(!('BarcodeDetector' in window)) return;
-    try{
-      const wanted=['ean_13','ean_8','upc_a','upc_e'];
-      let formats=wanted;
-      if(typeof window.BarcodeDetector.getSupportedFormats==='function'){
-        const supported=await window.BarcodeDetector.getSupportedFormats();
-        formats=wanted.filter(f=>supported.includes(f));
-      }
-      if(!formats.length) return;
-      this._barcodeDetector=new window.BarcodeDetector({formats});
-      this._decoderMode='native';
-    }catch(e){
-      this._barcodeDetector=null;
-      this._decoderMode='local';
+
+    if('BarcodeDetector' in window){
+      try{
+        const wanted=['ean_13','ean_8','upc_a','upc_e'];
+        let formats=wanted;
+        if(typeof window.BarcodeDetector.getSupportedFormats==='function'){
+          const supported=await window.BarcodeDetector.getSupportedFormats();
+          formats=wanted.filter(f=>supported.includes(f));
+        }
+        if(formats.length){
+          this._barcodeDetector=new window.BarcodeDetector({formats});
+          this._decoderMode='native';
+          return;
+        }
+      }catch(e){}
     }
+
+    try{
+      await this._loadZXing();
+      if(window.ZXing?.BrowserMultiFormatReader){
+        const hints=new Map();
+        if(window.ZXing.DecodeHintType && window.ZXing.BarcodeFormat){
+          hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,[
+            window.ZXing.BarcodeFormat.EAN_13,
+            window.ZXing.BarcodeFormat.EAN_8,
+            window.ZXing.BarcodeFormat.UPC_A,
+            window.ZXing.BarcodeFormat.UPC_E
+          ]);
+          hints.set(window.ZXing.DecodeHintType.TRY_HARDER,true);
+        }
+        this._zxingReader=new window.ZXing.BrowserMultiFormatReader(hints,250);
+        this._decoderMode='zxing';
+        return;
+      }
+    }catch(e){
+      console.warn('AH Shopping: ZXing could not be loaded',e);
+    }
+
+    this._decoderMode='local';
   }
+
+  async _loadZXing(){
+    if(window.ZXing?.BrowserMultiFormatReader)return;
+    if(window.__ahShoppingZXingPromise){
+      await window.__ahShoppingZXingPromise;
+      return;
+    }
+    window.__ahShoppingZXingPromise=new Promise((resolve,reject)=>{
+      const existing=document.querySelector('script[data-ah-shopping-zxing]');
+      if(existing){
+        existing.addEventListener('load',resolve,{once:true});
+        existing.addEventListener('error',()=>reject(new Error('ZXing kon niet worden geladen')),{once:true});
+        if(window.ZXing?.BrowserMultiFormatReader)resolve();
+        return;
+      }
+      const script=document.createElement('script');
+      script.src='https://cdn.jsdelivr.net/npm/@zxing/library@0.23.0/umd/index.min.js';
+      script.async=true;
+      script.dataset.ahShoppingZxing='true';
+      script.onload=()=>resolve();
+      script.onerror=()=>reject(new Error('ZXing CDN kon niet worden geladen'));
+      document.head.appendChild(script);
+    });
+    await window.__ahShoppingZXingPromise;
+  }
+
+  _startZXing(video){
+    if(!this._zxingReader)return;
+    const status=this._scanner?.querySelector('#scanstatus');
+    this._zxingTask=this._zxingReader.decodeFromVideoElementContinuously(video,(result,err)=>{
+      if(!this._scanner||!this._stream)return;
+      this._scanCount++;
+      if(result){
+        const raw=typeof result.getText==='function'?result.getText():result.text;
+        const code=String(raw||'').replace(/\D/g,'');
+        if(code){
+          this._barcodeFound(code);
+          return;
+        }
+      }
+      if(status && this._scanCount%10===0){
+        status.textContent=`ZXing actief · ${this._scanCount} frames gecontroleerd`;
+      }
+      if(err && window.ZXing?.NotFoundException && !(err instanceof window.ZXing.NotFoundException)){
+        console.debug('AH Shopping ZXing scan error',err);
+      }
+    }).catch(err=>{
+      console.warn('AH Shopping: ZXing scanning stopped',err);
+      if(!this._scanner||!this._stream)return;
+      this._decoderMode='local';
+      if(status)status.textContent='ZXing gestopt · lokale fallback actief';
+      this._scheduleScan();
+    });
+  }
+
   _scheduleScan(){clearTimeout(this._scanLoop);this._scanLoop=setTimeout(()=>this._scanFrame(),140);}
   async _scanFrame(){
     if(!this._scanner||!this._stream||this._scanBusy)return;
@@ -164,16 +249,17 @@ class AhShoppingCard extends HTMLElement {
     }
 
     if(status && this._scanCount%8===0){
-      status.textContent=`${this._decoderMode==='native'?'Native scanner':'Fallback scanner'} actief · ${this._scanCount} frames gecontroleerd`;
+      status.textContent=`${this._decoderMode==='native'?'Native scanner':'Lokale fallback'} actief · ${this._scanCount} frames gecontroleerd`;
     }
     this._scanBusy=false;
     this._scheduleScan();
   }
   async _barcodeFound(code){const status=this._scanner?.querySelector('#scanstatus'); if(status)status.textContent=`Gevonden: ${code} — toevoegen…`; this._stopCamera(false); try{const r=await this._service('add_barcode',{barcode:code,quantity:1}); const p=r.product||{}; if(status)status.textContent=`✓ ${p.title||code} · ${p.quantity_on_list||1}× op de lijst`; if(navigator.vibrate)navigator.vibrate(80); setTimeout(()=>this._closeScanner(),1000);}catch(e){if(status)status.textContent=e.message||String(e);setTimeout(()=>this._startCamera(),1800);}}
-  _stopCamera(clear=true){clearTimeout(this._scanLoop);this._scanLoop=null;this._scanBusy=false;if(this._stream){this._stream.getTracks().forEach(t=>t.stop());this._stream=null;}if(clear){this._scanCanvas=null;this._barcodeDetector=null;}}
+  _stopCamera(clear=true){clearTimeout(this._scanLoop);this._scanLoop=null;this._scanBusy=false;try{this._zxingReader?.reset();}catch(e){}this._zxingReader=null;this._zxingTask=null;if(this._stream){this._stream.getTracks().forEach(t=>t.stop());this._stream=null;}if(clear){this._scanCanvas=null;this._barcodeDetector=null;}}
   _closeScanner(){this._stopCamera();this._scanner?.remove();this._scanner=null;}
   disconnectedCallback(){this._closeScanner();}
   _css(){return `:host{display:block}ha-card{overflow:hidden}.fullCard.fixedHeight{display:flex;flex-direction:column}.fullCard.fixedHeight .head,.fullCard.fixedHeight .search,.fullCard.fixedHeight .results{flex:0 0 auto}.fullCard.fixedHeight .items{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}.fullCard.fixedHeight .results{max-height:35%;overflow-y:auto}.scanOnlyCard{padding:10px}.scanOnlyButton{display:block;width:100%;min-height:48px;font-size:16px}.head{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 18px 12px}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400}.search{display:flex;gap:8px;padding:0 18px 12px}.search input{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--divider-color);border-radius:10px;background:var(--card-background-color);color:var(--primary-text-color);font-size:15px}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.results{margin:0 18px 12px;border:1px solid var(--divider-color);border-radius:10px;overflow:hidden}.result{width:100%;display:grid;grid-template-columns:40px 1fr auto;gap:8px;text-align:left;align-items:center;border-radius:0;border-bottom:1px solid var(--divider-color);background:var(--card-background-color)}.result:last-child{border-bottom:0}.result img{width:36px;height:36px;object-fit:contain}.result em{font-size:9px;color:#00a03c;font-style:normal;text-align:right}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.scanner{position:fixed;z-index:10000;inset:0;background:#000e;display:grid;place-items:center;padding:12px}.scanbox{width:min(720px,100%);background:var(--card-background-color);border-radius:16px;overflow:hidden}.scanhead{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:18px}.scanhead button{font-size:24px}.videoWrap{position:relative;background:#000;aspect-ratio:4/3}.videoWrap video{width:100%;height:100%;object-fit:cover}.guide{position:absolute;left:8%;right:8%;top:35%;height:30%;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 9999px #0005}.guide:after{content:'';position:absolute;left:5%;right:5%;top:50%;height:2px;background:#f33}.scanbuttons{display:flex;gap:8px;justify-content:center;padding:12px}.scanbuttons button{min-width:130px}#scanstatus{text-align:center;padding:10px 12px 0;color:var(--secondary-text-color)}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.search{padding-left:14px;padding-right:14px}}`;}
 }
-customElements.define('ah-shopping-card',AhShoppingCard);
-window.customCards=window.customCards||[];window.customCards.push({type:'ah-shopping-card',name:'Albert Heijn Shopping',description:'Beheer je AH-boodschappenlijst en scan EAN-barcodes.'});
+if(!customElements.get('ah-shopping-card'))customElements.define('ah-shopping-card',AhShoppingCard);
+window.customCards=window.customCards||[];
+if(!window.customCards.some(c=>c.type==='ah-shopping-card'))window.customCards.push({type:'ah-shopping-card',name:'Albert Heijn Shopping',description:'Beheer je AH-boodschappenlijst en scan EAN-barcodes.'});
