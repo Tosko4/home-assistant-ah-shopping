@@ -1,0 +1,46 @@
+{
+  "title": "Albert Heijn Shopping",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Albert Heijn",
+        "description": "[Open Albert Heijn login]({login_url})\n\nLog in with Albert Heijn. When the browser redirects to appie://login-exit, copy the authorization code or the complete redirect URL and paste it below. Your AH password is never stored in Home Assistant.",
+        "data": {
+          "authorization_code": "Authorization code or redirect URL"
+        },
+        "data_description": {
+          "authorization_code": "Paste the value from the code parameter, or paste the complete appie://login-exit?... URL."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Albert Heijn",
+        "description": "Albert Heijn authentication has expired. [Open Albert Heijn login]({login_url}), log in again, then paste the new authorization code or complete redirect URL.",
+        "data": {
+          "authorization_code": "Authorization code or redirect URL"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Albert Heijn did not accept this authorization code. Obtain a new code and try again.",
+      "cannot_connect": "Could not connect to the Albert Heijn API. Check your connection and try again.",
+      "wrong_account": "You signed in with a different Albert Heijn account. Sign in with the account that was originally linked."
+    },
+    "abort": {
+      "already_configured": "This Albert Heijn account is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Shopping list settings",
+        "description": "Configure how often Home Assistant fully polls the AH list. Writes are applied immediately and reconciled automatically in between.",
+        "data": {
+          "update_interval_minutes": "Full update interval (minutes)"
+        },
+        "data_description": {
+          "update_interval_minutes": "1–60 minutes. Default 5."
+        }
+      }
+    }
+  }
+}
