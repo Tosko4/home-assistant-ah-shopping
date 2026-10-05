@@ -1,9 +1,19 @@
 name: Publish integration release
+
 on:
   push:
     branches: [main]
+    paths:
+      - custom_components/ah_shopping/manifest.json
+  workflow_dispatch:
+
 permissions:
   contents: write
+
+concurrency:
+  group: ah-shopping-release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -21,9 +31,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
-          if gh release view "$VERSION" >/dev/null 2>&1; then exit 0; fi
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists"
+            exit 0
+          fi
           gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "Refresh HACS metadata for $VERSION [skip ci]"
-          git push
