@@ -404,3 +404,46 @@ def test_active_cart_404_is_empty():
     assert cart.order_id == 0
     assert cart.total_quantity == 0
     assert cart.items == ()
+
+
+def test_set_cart_quantity_uses_order_items_put():
+    class CartClient(AhShoppingApiClient):
+        request = None
+
+        async def _raw_request(self, method, path, **kwargs):
+            self.request = (method, path, kwargs)
+            return {}
+
+    client = CartClient(None, access_token="token")
+    asyncio.run(
+        client.async_set_cart_product_quantity(
+            12345,
+            4,
+            description="Melk",
+        )
+    )
+    method, path, kwargs = client.request
+    assert method == "PUT"
+    assert path == "/mobile-services/order/v1/items?sortBy=DEFAULT"
+    item = kwargs["json_body"]["items"][0]
+    assert item == {
+        "productId": 12345,
+        "quantity": 4,
+        "originCode": "PRD",
+        "description": "Melk",
+        "strikethrough": False,
+    }
+
+
+def test_set_cart_quantity_zero_removes_product():
+    class CartClient(AhShoppingApiClient):
+        request = None
+
+        async def _raw_request(self, method, path, **kwargs):
+            self.request = (method, path, kwargs)
+            return {}
+
+    client = CartClient(None, access_token="token")
+    asyncio.run(client.async_set_cart_product_quantity(12345, 0))
+    item = client.request[2]["json_body"]["items"][0]
+    assert item["quantity"] == 0
