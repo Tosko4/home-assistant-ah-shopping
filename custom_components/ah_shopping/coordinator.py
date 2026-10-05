@@ -18,7 +18,7 @@ from .const import (
     NAME,
 )
 from .exceptions import AhAuthError, AhShoppingError
-from .models import ActiveCartData, NextOrderData, Product, ShoppingItem, ShoppingListData
+from .models import NextOrderData, Product, ShoppingItem, ShoppingListData
 
 _LOGGER = logging.getLogger(__name__)
 _PENDING_TTL = 20.0
@@ -192,87 +192,3 @@ class AhNextOrderCoordinator(DataUpdateCoordinator[NextOrderData]):
             return self.data if self.data is not None else NextOrderData()
 
 
-
-class AhActiveCartCoordinator(DataUpdateCoordinator[ActiveCartData]):
-    """Poll and edit the current active AH cart."""
-
-    def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, client: AhShoppingApiClient
-    ) -> None:
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{NAME} active cart",
-            update_interval=timedelta(
-                minutes=int(
-                    entry.options.get(
-                        CONF_UPDATE_INTERVAL_MINUTES,
-                        DEFAULT_UPDATE_INTERVAL_MINUTES,
-                    )
-                )
-            ),
-            config_entry=entry,
-        )
-        self.client = client
-        self._pending_quantities: dict[int, tuple[int, float]] = {}
-        self._write_locks: dict[str, asyncio.Lock] = {}
-        self._reconcile_task: asyncio.Task | None = None
-
-    def product_lock(self, key: int | str) -> asyncio.Lock:
-        text = str(key)
-        lock = self._write_locks.get(text)
-        if lock is None:
-            lock = self._write_locks[text] = asyncio.Lock()
-        return lock
-
-    @property
-    def pending_change_count(self) -> int:
-        return len(self._pending_quantities)
-
-    def note_quantity(self, product_id: int, quantity: int) -> None:
-        """Apply a confirmed cart write locally and reconcile shortly after."""
-        self._pending_quantities[int(product_id)] = (
-            max(0, int(quantity)),
-            time.monotonic(),
-        )
-        self.async_set_updated_data(
-            self.data.with_product_quantity(product_id, quantity)
-        )
-        self._schedule_reconcile()
-
-    def _schedule_reconcile(self) -> None:
-        if self._reconcile_task and not self._reconcile_task.done():
-            self._reconcile_task.cancel()
-        self._reconcile_task = self.hass.async_create_task(self._delayed_reconcile())
-
-    async def _delayed_reconcile(self) -> None:
-        try:
-            await asyncio.sleep(_RECONCILE_DELAY)
-            await self.async_request_refresh()
-        except asyncio.CancelledError:
-            return
-
-    def _merge_pending(self, remote: ActiveCartData) -> ActiveCartData:
-        now = time.monotonic()
-        merged = remote
-        remaining: dict[int, tuple[int, float]] = {}
-        for product_id, (desired, created) in self._pending_quantities.items():
-            remote_qty = remote.quantity_for_product(product_id)
-            if remote_qty == desired:
-                continue
-            if now - created >= _PENDING_TTL:
-                continue
-            merged = merged.with_product_quantity(product_id, desired)
-            remaining[product_id] = (desired, created)
-        self._pending_quantities = remaining
-        return merged
-
-    async def _async_update_data(self) -> ActiveCartData:
-        try:
-            remote = await self.client.async_get_active_cart()
-            return self._merge_pending(remote)
-        except AhAuthError as err:
-            raise ConfigEntryAuthFailed(str(err)) from err
-        except AhShoppingError as err:
-            _LOGGER.warning("Could not update AH active cart: %s", err)
-            return self.data if self.data is not None else ActiveCartData()
