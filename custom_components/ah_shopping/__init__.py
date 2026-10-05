@@ -18,6 +18,9 @@ class AhShoppingRuntimeData:
 
 type AhShoppingConfigEntry = ConfigEntry[AhShoppingRuntimeData]
 
+async def _async_reload_entry(hass: HomeAssistant, entry: AhShoppingConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
+
 async def async_setup_entry(hass:HomeAssistant,entry:AhShoppingConfigEntry)->bool:
     async def save_tokens(token_data:dict[str,Any])->None:
         hass.config_entries.async_update_entry(entry,data={**entry.data,**token_data})
@@ -25,6 +28,7 @@ async def async_setup_entry(hass:HomeAssistant,entry:AhShoppingConfigEntry)->boo
     coordinator=AhShoppingCoordinator(hass,entry,client)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data=AhShoppingRuntimeData(client,coordinator)
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     await async_setup_services(hass)
     await async_register_frontend(hass)
     await hass.config_entries.async_forward_entry_setups(entry,PLATFORMS)
