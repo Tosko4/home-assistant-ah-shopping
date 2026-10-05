@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.13
+## 0.2.0
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -18,7 +18,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 - Camera barcode scanner directly inside the dashboard
 - Front/rear camera switch
 - Local EAN-13/EAN-8 decoding; UPC-A is handled as EAN-13 with a leading zero
-- Native read-only `todo` entity for standard HA list views
+- Native writable `todo` entity: add free-text items, check/uncheck and delete
 
 ## Installation
 
@@ -90,13 +90,20 @@ The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses t
 - `ah_shopping.remove_product`
 - `ah_shopping.refresh`
 
-## Known MVP limitations
+## Synchronisation and conflicts
 
-- Only the first/default AH list is used.
-- Free-text/non-product list entries are not shown yet.
-- The total is an estimate: multi-buy promotions such as `1+1 gratis` may not be mathematically reflected even though the Bonus label is shown.
-- Native `todo` editing is planned after the richer product model is proven stable.
-- Barcode scan reliability depends on focus, light and barcode size. Hold the barcode horizontally inside the on-screen frame.
+The full AH list is polled every **5 minutes by default**. The interval is configurable from the integration's **Configure** screen between 1 and 60 minutes.
+
+Writes do not wait for the next poll. After a successful AH write, Home Assistant updates immediately and schedules a reconciliation pull after about 1 second. Recent local quantity/check changes are protected for up to 20 seconds from an eventually-consistent/stale AH response. As soon as AH returns the requested value, the pending change is confirmed and cleared. If AH continues to disagree after that protection window, the AH server becomes authoritative again.
+
+Writes for the same product are serialized inside the integration. Explicit absolute quantity changes are last-successful-write-wins when multiple clients edit the same product concurrently.
+
+## Known limitations
+
+- AH exposes one account-wide "Mijn lijst"; multiple favorites lists are not handled by this integration.
+- Rename through the native HA To-do entity is not supported; delete and recreate the item instead.
+- Bonus totals are calculated for the supported promotion formats; unknown future AH promotion wording can still make the displayed total an estimate.
+- Barcode reliability still depends on camera focus, light and barcode size.
 
 ## Next likely steps
 
@@ -169,3 +176,18 @@ The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses t
 - Adds "Scan volgende" and "Klaar" actions instead of auto-closing the scanner after one second.
 - Newly scanned products are inserted into the Home Assistant coordinator immediately, before the background AH refresh completes.
 - Keeps an active scanner modal open while Home Assistant entity updates arrive, preventing scan-result UI from disappearing mid-flow.
+
+
+### 0.2.0
+
+- Preserves the internal list scroll position across quantity/state updates, so +/- on a bottom item no longer jumps the card back to the top.
+- Fixes product search for both AH `products` and `data` response shapes and normalises alternate title/price/unit/image fields.
+- Adds visible search states: searching, no results and errors.
+- Adds an in-card manual refresh button and shows pending sync changes.
+- Adds checked/completed state to list items and a checkbox in the custom card.
+- Makes the native Home Assistant To-do entity writable: create free-text items, check/uncheck and delete.
+- Quantity writes now preserve item description and checked state.
+- Adds conflict-safe reconciliation: local successful writes are protected against stale immediate reads, then reconciled back to AH.
+- Serializes writes for the same product.
+- Adds configurable full polling interval (1–60 minutes, default 5).
+- Adds list diagnostics attributes: `last_synced`, `pending_changes`, and `update_interval_seconds`.
