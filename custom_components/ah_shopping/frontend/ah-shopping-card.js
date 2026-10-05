@@ -1,7 +1,7 @@
 import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._search=[]; this._searchLoading=false; this._searchError=''; this._searchPerformed=false; this._searchSeq=0; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false; this._barcodeHandling=false; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map();}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._search=[]; this._searchLoading=false; this._searchError=''; this._searchPerformed=false; this._searchSeq=0; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._facing='environment'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map();}
   static getStubConfig(){return {title:'Boodschappen',mode:'full'};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
@@ -98,21 +98,6 @@ class AhShoppingCard extends HTMLElement {
     }
   }
 
-  async _toggleChecked(itemId,checked){
-    try{
-      await this._service('set_checked',{item_id:itemId,checked});
-    }catch(e){
-      this._toast(e.message||String(e),true);
-    }
-  }
-
-  async _deleteItem(itemId){
-    try{
-      await this._service('delete_item',{item_id:itemId});
-    }catch(e){
-      this._toast(e.message||String(e),true);
-    }
-  }
   async _addProduct(pid){if(this._busy)return;this._busy=true;try{await this._service('add_product',{product_id:pid,quantity:1});this._search=[];this._query='';this._toast('Toegevoegd');}catch(e){this._toast(e.message||String(e),true);}finally{this._busy=false;this._render();}}
   _toast(msg,error=false){this._message=msg;this._messageError=error;this._render();clearTimeout(this._msgTimer);this._msgTimer=setTimeout(()=>{this._message='';this._render();},2800);}
   _render(){
@@ -162,8 +147,6 @@ class AhShoppingCard extends HTMLElement {
     this.shadowRoot.querySelectorAll('[data-minus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(Number(el.dataset.pid),Number(el.dataset.qty),-1)));
     this.shadowRoot.querySelectorAll('[data-plus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(Number(el.dataset.pid),Number(el.dataset.qty),1)));
     this.shadowRoot.querySelectorAll('[data-remove]').forEach(el=>el.addEventListener('click',()=>this._remove(Number(el.dataset.pid))));
-    this.shadowRoot.querySelectorAll('[data-check]').forEach(el=>el.addEventListener('change',()=>this._toggleChecked(el.dataset.itemId,el.checked)));
-    this.shadowRoot.querySelectorAll('[data-delete-item]').forEach(el=>el.addEventListener('click',()=>this._deleteItem(el.dataset.itemId)));
     const list=this.shadowRoot.querySelector('.items');
     if(list)list.scrollTop=this._listScrollTop;
     if(restoreSearch&&q){
@@ -171,21 +154,38 @@ class AhShoppingCard extends HTMLElement {
       if(selectionStart!==null&&selectionEnd!==null)q.setSelectionRange(selectionStart,selectionEnd);
     }
   }
-  _item(i){const qty=this._pendingQty.has(i.product_id)?this._pendingQty.get(i.product_id):i.quantity; const bonus=i.is_bonus?`<div class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</div>`:''; const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:''; const price=i.is_product?`<div class="price">${old}${this._money(i.price_now)}</div>`:'<small>Tekstitem</small>'; const productControls=i.is_product?`<div class="qty"><button data-minus data-pid="${i.product_id}" data-qty="${qty}">−</button><span>${qty}</span><button data-plus data-pid="${i.product_id}" data-qty="${qty}">+</button><button class="trash" data-remove data-pid="${i.product_id}">×</button></div>`:`<div class="qty"><span>${i.quantity}×</span><button class="trash" data-delete-item data-item-id="${this._esc(i.item_id)}">×</button></div>`; return `<div class="item ${i.checked?'checked':''}">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><div class="itemTitle"><input type="checkbox" data-check data-item-id="${this._esc(i.item_id)}" ${i.checked?'checked':''}><b>${this._esc(i.title)}</b></div><small>${this._esc(i.unit_size||'')}</small>${price}${bonus}</div>${productControls}</div>`;}
+  _item(i){const qty=this._pendingQty.has(i.product_id)?this._pendingQty.get(i.product_id):i.quantity; const bonus=i.is_bonus?`<div class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</div>`:''; const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:''; const price=i.is_product?`<div class="price">${old}${this._money(i.price_now)}</div>`:'<small>Tekstitem</small>'; const controls=i.is_product?`<div class="qty"><button data-minus data-pid="${i.product_id}" data-qty="${qty}">−</button><span>${qty}</span><button data-plus data-pid="${i.product_id}" data-qty="${qty}">+</button><button class="trash" data-remove data-pid="${i.product_id}">×</button></div>`:`<div class="qty"><span>${i.quantity}×</span></div>`; return `<div class="item">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><small>${this._esc(i.unit_size||'')}</small>${price}${bonus}</div>${controls}</div>`;}
   async _openScanner(){
     if(!navigator.mediaDevices?.getUserMedia){this._toast('Camera is niet beschikbaar. Gebruik HTTPS en geef cameratoegang.',true);return;}
     this._armScanAudio();
-    this._barcodeHandling=false;
+    this._scanQueue=[];
+    this._scanProcessing=false;
+    this._heldBarcode='';
+    this._heldBarcodeLastSeen=0;
     this._scanProduct=null;
+
     const modal=document.createElement('div');
     modal.className='scanner';
-    modal.innerHTML=`<style>${this._css()}</style><div class="scanbox"><div class="scanhead"><b>Barcode scannen</b><button id="close">×</button></div><div class="videoWrap"><video playsinline muted autoplay></video><div class="guide"></div></div><div id="scanstatus">Richt de barcode horizontaal in het kader</div><div id="scanresult" class="scanResult" hidden></div><div class="scanbuttons"><button id="flip">↻ Voor/achter</button><button id="cancel">Klaar</button></div></div>`;
+    modal.innerHTML=`<style>${this._css()}</style><div class="scanbox"><div class="scanhead"><div><b>Barcode scannen</b><small>Camera maximaal 1 minuut actief</small></div><button id="close">×</button></div><div class="scanbody"><div class="scanCameraPane"><div class="videoWrap"><video playsinline muted autoplay></video><div class="guide"></div></div><div id="scanstatus">Richt de barcode horizontaal in het kader</div><div class="scanbuttons"><button id="flip">↻ Voor/achter</button><button id="cancel">Klaar</button></div></div><div id="scanresult" class="scanResult"><div class="scanPlaceholder"><span>🛒</span><b>Nog niets gescand</b><small>Een succesvol gescand product verschijnt hier.</small></div></div></div></div>`;
     this.shadowRoot.appendChild(modal);
     this._scanner=modal;
     modal.querySelector('#close').onclick=()=>this._closeScanner();
     modal.querySelector('#cancel').onclick=()=>this._closeScanner();
     modal.querySelector('#flip').onclick=async()=>{this._facing=this._facing==='environment'?'user':'environment';await this._startCamera();};
+
+    this._armScannerTimeout(60000);
     await this._startCamera();
+  }
+
+  _armScannerTimeout(ms){
+    clearTimeout(this._scanSessionTimer);
+    this._scanSessionTimer=setTimeout(()=>{
+      if(this._scanProcessing||this._scanQueue.length){
+        this._armScannerTimeout(1000);
+        return;
+      }
+      this._closeScanner();
+    },ms);
   }
 
   _armScanAudio(){
@@ -217,6 +217,7 @@ class AhShoppingCard extends HTMLElement {
       osc.stop(now+0.12);
     }catch(e){}
   }
+
   async _startCamera(){
     if(!this._scanner)return;
     this._stopCamera();
@@ -232,13 +233,11 @@ class AhShoppingCard extends HTMLElement {
       await this._initScannerEngine();
       const label=this._decoderMode==='native'?'native':this._decoderMode==='zxing'?'ZXing':'lokale fallback';
       status.textContent=`${this._facing==='environment'?'Achtercamera':'Frontcamera'} · scanner: ${label} · zoeken…`;
-      if(this._decoderMode==='zxing'){
-        this._startZXing(video);
-      }else{
-        this._scheduleScan();
-      }
+      if(this._decoderMode==='zxing')this._startZXing(video);
+      else this._scheduleScan();
+    }catch(e){
+      status.textContent=`Camera kon niet openen: ${e.message||e}`;
     }
-    catch(e){status.textContent=`Camera kon niet openen: ${e.message||e}`;}
   }
 
   async _initScannerEngine(){
@@ -266,7 +265,7 @@ class AhShoppingCard extends HTMLElement {
       await this._loadZXing();
       if(window.ZXing?.BrowserMultiFormatReader){
         const hints=new Map();
-        if(window.ZXing.DecodeHintType && window.ZXing.BarcodeFormat){
+        if(window.ZXing.DecodeHintType&&window.ZXing.BarcodeFormat){
           hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,[
             window.ZXing.BarcodeFormat.EAN_13,
             window.ZXing.BarcodeFormat.EAN_8,
@@ -282,16 +281,12 @@ class AhShoppingCard extends HTMLElement {
     }catch(e){
       console.warn('AH Shopping: ZXing could not be loaded',e);
     }
-
     this._decoderMode='local';
   }
 
   async _loadZXing(){
     if(window.ZXing?.BrowserMultiFormatReader)return;
-    if(window.__ahShoppingZXingPromise){
-      await window.__ahShoppingZXingPromise;
-      return;
-    }
+    if(window.__ahShoppingZXingPromise){await window.__ahShoppingZXingPromise;return;}
     window.__ahShoppingZXingPromise=new Promise((resolve,reject)=>{
       const existing=document.querySelector('script[data-ah-shopping-zxing]');
       if(existing){
@@ -320,15 +315,14 @@ class AhShoppingCard extends HTMLElement {
       if(result){
         const raw=typeof result.getText==='function'?result.getText():result.text;
         const code=String(raw||'').replace(/\D/g,'');
-        if(code){
-          this._barcodeFound(code);
-          return;
-        }
+        if(code)this._barcodeDetected(code);
+      }else{
+        this._noteBarcodeAbsent();
       }
-      if(status && this._scanCount%10===0){
+      if(status&&this._scanCount%10===0&&!this._scanProcessing){
         status.textContent=`ZXing actief · ${this._scanCount} frames gecontroleerd`;
       }
-      if(err && window.ZXing?.NotFoundException && !(err instanceof window.ZXing.NotFoundException)){
+      if(err&&window.ZXing?.NotFoundException&&!(err instanceof window.ZXing.NotFoundException)){
         console.debug('AH Shopping ZXing scan error',err);
       }
     }).catch(err=>{
@@ -341,6 +335,7 @@ class AhShoppingCard extends HTMLElement {
   }
 
   _scheduleScan(){clearTimeout(this._scanLoop);this._scanLoop=setTimeout(()=>this._scanFrame(),140);}
+
   async _scanFrame(){
     if(!this._scanner||!this._stream||this._scanBusy)return;
     const video=this._scanner.querySelector('video');
@@ -354,7 +349,7 @@ class AhShoppingCard extends HTMLElement {
       try{
         const found=await this._barcodeDetector.detect(video);
         const hit=(found||[]).find(x=>x?.rawValue);
-        if(hit) code=String(hit.rawValue).replace(/\D/g,'');
+        if(hit)code=String(hit.rawValue).replace(/\D/g,'');
       }catch(e){}
     }
 
@@ -368,48 +363,62 @@ class AhShoppingCard extends HTMLElement {
       try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
     }
 
-    if(code && (/^\d{8}$/.test(code)||/^\d{12,14}$/.test(code)) && (code.length===12||code.length===14||checksumOk(code))){
-      this._scanBusy=false;
-      await this._barcodeFound(code);
-      return;
+    if(code&&(/^\d{8}$/.test(code)||/^\d{12,14}$/.test(code))&&(code.length===12||code.length===14||checksumOk(code))){
+      this._barcodeDetected(code);
+    }else{
+      this._noteBarcodeAbsent();
     }
 
-    if(status && this._scanCount%8===0){
+    if(status&&this._scanCount%8===0&&!this._scanProcessing){
       status.textContent=`${this._decoderMode==='native'?'Native scanner':'Lokale fallback'} actief · ${this._scanCount} frames gecontroleerd`;
     }
     this._scanBusy=false;
     this._scheduleScan();
   }
-  async _barcodeFound(code){
-    if(this._barcodeHandling)return;
-    this._barcodeHandling=true;
-    const status=this._scanner?.querySelector('#scanstatus');
-    if(status)status.textContent=`Gevonden: ${code} — product ophalen…`;
-    this._stopCamera(false);
-    try{
-      const r=await this._service('add_barcode',{barcode:code,quantity:1});
-      const p={...(r.product||{})};
-      p.barcode=code;
-      p.quantity_on_list=Math.max(1,Number(p.quantity_on_list||1));
-      this._scanProduct=p;
-      this._playScanBeep();
-      if(navigator.vibrate)navigator.vibrate(70);
-      this._showScanResult();
-    }catch(e){
-      this._barcodeHandling=false;
-      if(status)status.textContent=e.message||String(e);
-      setTimeout(()=>this._startCamera(),1800);
+
+  _noteBarcodeAbsent(){
+    if(this._heldBarcode&&Date.now()-this._heldBarcodeLastSeen>700){
+      this._heldBarcode='';
+      this._heldBarcodeLastSeen=0;
     }
   }
 
-  _showScanResult(){
-    if(!this._scanner||!this._scanProduct)return;
-    this._scanner.querySelector('.videoWrap')?.setAttribute('hidden','');
-    this._scanner.querySelector('#scanstatus')?.setAttribute('hidden','');
-    this._scanner.querySelector('.scanbuttons')?.setAttribute('hidden','');
-    const result=this._scanner.querySelector('#scanresult');
-    if(result)result.hidden=false;
-    this._renderScanResult();
+  _barcodeDetected(code){
+    const now=Date.now();
+    if(this._heldBarcode===code){
+      this._heldBarcodeLastSeen=now;
+      return;
+    }
+    this._heldBarcode=code;
+    this._heldBarcodeLastSeen=now;
+    this._scanQueue.push(code);
+    const status=this._scanner?.querySelector('#scanstatus');
+    if(status)status.textContent=`Gevonden: ${code} · verwerken…`;
+    this._processScanQueue();
+  }
+
+  async _processScanQueue(){
+    if(this._scanProcessing)return;
+    this._scanProcessing=true;
+    while(this._scanner&&this._scanQueue.length){
+      const code=this._scanQueue.shift();
+      const status=this._scanner.querySelector('#scanstatus');
+      try{
+        const r=await this._service('add_barcode',{barcode:code,quantity:1});
+        const p={...(r.product||{})};
+        p.barcode=code;
+        p.quantity_on_list=Math.max(1,Number(p.quantity_on_list||1));
+        this._scanProduct=p;
+        this._playScanBeep();
+        if(navigator.vibrate)navigator.vibrate(70);
+        this._renderScanResult();
+        if(status)status.textContent=`✓ ${p.title||code} · blijf scannen · sluit 5 sec na laatste scan`;
+        this._armScannerTimeout(5000);
+      }catch(e){
+        if(status)status.textContent=e.message||String(e);
+      }
+    }
+    this._scanProcessing=false;
   }
 
   _renderScanResult(){
@@ -420,11 +429,9 @@ class AhShoppingCard extends HTMLElement {
     const old=p.price_was>p.price_now?`<s>${this._money(p.price_was)}</s> `:'';
     const bonus=p.is_bonus?`<div class="scanBonus">BONUS · ${this._esc(p.bonus_mechanism||'Aanbieding')}</div>`:'';
     const image=p.image_url?`<img src="${this._esc(p.image_url)}" alt="">`:'<div class="scanPh">🛒</div>';
-    result.innerHTML=`<div class="scanSuccess">✓ Gescand</div><div class="scanProduct">${image}<div class="scanProductInfo"><b>${this._esc(p.title||p.barcode||'Product')}</b><small>${this._esc(p.unit_size||'')}</small><div class="scanPrice">${old}${this._money(p.price_now)}</div>${bonus}</div></div><div class="scanQtyRow"><span>Aantal op lijst</span><div class="scanQty"><button id="scanMinus">−</button><strong>${qty}</strong><button id="scanPlus">+</button></div></div><div class="scanResultActions"><button id="scanNext" class="primary">Scan volgende</button><button id="scanDone">Klaar</button></div>`;
+    result.innerHTML=`<div class="scanSuccess">✓ Gescand</div><div class="scanProduct">${image}<div class="scanProductInfo"><b>${this._esc(p.title||p.barcode||'Product')}</b><small>${this._esc(p.unit_size||'')}</small><div class="scanPrice">${old}${this._money(p.price_now)}</div>${bonus}</div></div><div class="scanQtyRow"><span>Aantal op lijst</span><div class="scanQty"><button id="scanMinus">−</button><strong>${qty}</strong><button id="scanPlus">+</button></div></div><small class="scanHint">De camera blijft actief. Haal dezelfde barcode kort uit beeld voordat je hem opnieuw scant.</small>`;
     result.querySelector('#scanMinus')?.addEventListener('click',()=>this._adjustScanQuantity(-1));
     result.querySelector('#scanPlus')?.addEventListener('click',()=>this._adjustScanQuantity(1));
-    result.querySelector('#scanNext')?.addEventListener('click',()=>this._scanNext());
-    result.querySelector('#scanDone')?.addEventListener('click',()=>this._closeScanner());
   }
 
   _adjustScanQuantity(delta){
@@ -461,21 +468,39 @@ class AhShoppingCard extends HTMLElement {
     this._scanQtyWorkers.set(pid,worker);
   }
 
-  async _scanNext(){
-    if(!this._scanner)return;
-    this._scanProduct=null;
-    this._barcodeHandling=false;
-    const result=this._scanner.querySelector('#scanresult');
-    if(result){result.hidden=true;result.innerHTML='';}
-    this._scanner.querySelector('.videoWrap')?.removeAttribute('hidden');
-    this._scanner.querySelector('#scanstatus')?.removeAttribute('hidden');
-    this._scanner.querySelector('.scanbuttons')?.removeAttribute('hidden');
-    await this._startCamera();
+  _stopCamera(clear=true){
+    clearTimeout(this._scanLoop);
+    this._scanLoop=null;
+    this._scanBusy=false;
+    try{this._zxingReader?.reset();}catch(e){}
+    this._zxingReader=null;
+    this._zxingTask=null;
+    if(this._stream){
+      this._stream.getTracks().forEach(t=>t.stop());
+      this._stream=null;
+    }
+    if(clear){
+      this._scanCanvas=null;
+      this._barcodeDetector=null;
+    }
   }
-  _stopCamera(clear=true){clearTimeout(this._scanLoop);this._scanLoop=null;this._scanBusy=false;try{this._zxingReader?.reset();}catch(e){}this._zxingReader=null;this._zxingTask=null;if(this._stream){this._stream.getTracks().forEach(t=>t.stop());this._stream=null;}if(clear){this._scanCanvas=null;this._barcodeDetector=null;}}
-  _closeScanner(){this._stopCamera();this._scanner?.remove();this._scanner=null;this._scanProduct=null;this._barcodeHandling=false;this._render();}
+
+  _closeScanner(){
+    clearTimeout(this._scanSessionTimer);
+    this._scanSessionTimer=null;
+    this._scanQueue=[];
+    this._stopCamera();
+    this._scanner?.remove();
+    this._scanner=null;
+    this._scanProduct=null;
+    this._scanProcessing=false;
+    this._heldBarcode='';
+    this._render();
+  }
+
   disconnectedCallback(){this._closeScanner();}
-  _css(){return `:host{display:block}ha-card{overflow:hidden}.fullCard.fixedHeight{display:flex;flex-direction:column}.fullCard.fixedHeight .head,.fullCard.fixedHeight .search,.fullCard.fixedHeight .results{flex:0 0 auto}.fullCard.fixedHeight .items{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}.fullCard.fixedHeight .results{max-height:35%;overflow-y:auto}.scanOnlyCard{padding:10px}.scanOnlyButton{display:block;width:100%;min-height:48px;font-size:16px}.head{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 18px 12px}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400}.search{display:flex;gap:8px;padding:0 18px 12px}.search input{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--divider-color);border-radius:10px;background:var(--card-background-color);color:var(--primary-text-color);font-size:15px}.searchState{margin:-4px 18px 10px;color:var(--secondary-text-color);font-size:12px}.errorText{color:var(--error-color,#c62828)}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.itemTitle{display:flex;align-items:center;gap:8px;min-width:0}.itemTitle input{width:18px;height:18px;flex:0 0 auto}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.item.checked .info b{text-decoration:line-through;opacity:.6}.item.checked img,.item.checked .ph{opacity:.55}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.results{margin:0 18px 12px;border:1px solid var(--divider-color);border-radius:10px;overflow:hidden}.result{width:100%;display:grid;grid-template-columns:40px 1fr auto;gap:8px;text-align:left;align-items:center;border-radius:0;border-bottom:1px solid var(--divider-color);background:var(--card-background-color)}.result:last-child{border-bottom:0}.result img{width:36px;height:36px;object-fit:contain}.result em{font-size:9px;color:#00a03c;font-style:normal;text-align:right}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.scanner{position:fixed;z-index:10000;inset:0;background:#000e;display:grid;place-items:center;padding:12px}.scanbox{width:min(720px,100%);background:var(--card-background-color);border-radius:16px;overflow:hidden}.scanhead{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:18px}.scanhead button{font-size:24px}.videoWrap{position:relative;background:#000;aspect-ratio:4/3}.videoWrap video{width:100%;height:100%;object-fit:cover}.guide{position:absolute;left:8%;right:8%;top:35%;height:30%;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 9999px #0005}.guide:after{content:'';position:absolute;left:5%;right:5%;top:50%;height:2px;background:#f33}.scanbuttons{display:flex;gap:8px;justify-content:center;padding:12px}.scanbuttons[hidden]{display:none!important}.scanbuttons button{min-width:130px}#scanstatus{text-align:center;padding:10px 12px 0;color:var(--secondary-text-color)}#scanstatus[hidden],.videoWrap[hidden],.scanResult[hidden]{display:none!important}.scanResult{padding:16px}.scanSuccess{font-weight:800;color:#00a03c;margin-bottom:12px}.scanProduct{display:grid;grid-template-columns:84px 1fr;gap:14px;align-items:center}.scanProduct img,.scanPh{width:80px;height:80px;object-fit:contain;border-radius:12px;background:var(--secondary-background-color)}.scanPh{display:grid;place-items:center;font-size:32px}.scanProductInfo b{display:block;font-size:17px;line-height:1.25}.scanPrice{font-size:22px;font-weight:800;margin-top:7px}.scanPrice s{font-size:13px;font-weight:400;color:var(--secondary-text-color)}.scanBonus{display:inline-block;margin-top:6px;padding:3px 7px;border-radius:6px;background:#00a03c;color:#fff;font-size:11px;font-weight:800}.scanQtyRow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;padding-top:14px;border-top:1px solid var(--divider-color)}.scanQty{display:flex;align-items:center;gap:8px}.scanQty button{width:42px;height:42px;padding:0;font-size:24px}.scanQty strong{min-width:32px;text-align:center;font-size:18px}.scanResultActions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:18px}.scanResultActions button{min-height:46px}.scanError{margin-bottom:10px;padding:8px 10px;border-radius:8px;background:var(--error-color,#c62828);color:#fff;font-size:12px}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.search{padding-left:14px;padding-right:14px}}`;}
+
+  _css(){return `:host{display:block}ha-card{overflow:hidden}.fullCard.fixedHeight{display:flex;flex-direction:column}.fullCard.fixedHeight .head,.fullCard.fixedHeight .search,.fullCard.fixedHeight .results{flex:0 0 auto}.fullCard.fixedHeight .items{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}.fullCard.fixedHeight .results{max-height:35%;overflow-y:auto}.scanOnlyCard{padding:10px}.scanOnlyButton{display:block;width:100%;min-height:48px;font-size:16px}.head{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 18px 12px}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400}.search{display:flex;gap:8px;padding:0 18px 12px}.search input{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--divider-color);border-radius:10px;background:var(--card-background-color);color:var(--primary-text-color);font-size:15px}.searchState{margin:-4px 18px 10px;color:var(--secondary-text-color);font-size:12px}.errorText{color:var(--error-color,#c62828)}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.results{margin:0 18px 12px;border:1px solid var(--divider-color);border-radius:10px;overflow:hidden}.result{width:100%;display:grid;grid-template-columns:40px 1fr auto;gap:8px;text-align:left;align-items:center;border-radius:0;border-bottom:1px solid var(--divider-color);background:var(--card-background-color)}.result:last-child{border-bottom:0}.result img{width:36px;height:36px;object-fit:contain}.result em{font-size:9px;color:#00a03c;font-style:normal;text-align:right}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.scanner{position:fixed;z-index:10000;inset:0;background:#000e;display:grid;place-items:center;padding:12px}.scanbox{width:min(1120px,100%);max-height:calc(100vh - 24px);background:var(--card-background-color);border-radius:16px;overflow:auto}.scanhead{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:18px}.scanhead button{font-size:24px}.scanbody{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.8fr);min-height:0}.scanCameraPane{min-width:0;border-right:1px solid var(--divider-color)}.videoWrap{position:relative;background:#000;aspect-ratio:4/3}.videoWrap video{width:100%;height:100%;object-fit:cover}.guide{position:absolute;left:8%;right:8%;top:35%;height:30%;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 9999px #0005}.guide:after{content:'';position:absolute;left:5%;right:5%;top:50%;height:2px;background:#f33}.scanbuttons{display:flex;gap:8px;justify-content:center;padding:12px}.scanbuttons button{min-width:130px}#scanstatus{text-align:center;padding:10px 12px 0;color:var(--secondary-text-color)}.scanResult{padding:18px;display:flex;flex-direction:column;justify-content:center}.scanPlaceholder{text-align:center;color:var(--secondary-text-color);padding:32px 10px}.scanPlaceholder span{display:block;font-size:38px;margin-bottom:8px}.scanPlaceholder b{display:block;color:var(--primary-text-color);margin-bottom:5px}.scanSuccess{font-weight:800;color:#00a03c;margin-bottom:12px}.scanProduct{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center}.scanProduct img,.scanPh{width:92px;height:92px;object-fit:contain;border-radius:12px;background:var(--secondary-background-color)}.scanPh{display:grid;place-items:center;font-size:32px}.scanProductInfo b{display:block;font-size:18px;line-height:1.25}.scanPrice{font-size:25px;font-weight:800;margin-top:7px}.scanPrice s{font-size:13px;font-weight:400;color:var(--secondary-text-color)}.scanBonus{display:inline-block;margin-top:6px;padding:3px 7px;border-radius:6px;background:#00a03c;color:#fff;font-size:11px;font-weight:800}.scanQtyRow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px;padding-top:15px;border-top:1px solid var(--divider-color)}.scanQty{display:flex;align-items:center;gap:8px}.scanQty button{width:44px;height:44px;padding:0;font-size:25px}.scanQty strong{min-width:34px;text-align:center;font-size:20px}.scanHint{margin-top:14px;line-height:1.35}.scanError{margin-bottom:10px;padding:8px 10px;border-radius:8px;background:var(--error-color,#c62828);color:#fff;font-size:12px}@media(max-width:800px){.scanbox{width:min(720px,100%)}.scanbody{grid-template-columns:1fr}.scanCameraPane{border-right:0;border-bottom:1px solid var(--divider-color)}.scanResult{min-height:210px}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.search{padding-left:14px;padding-right:14px}}`;}
 }
 if(!customElements.get('ah-shopping-card'))customElements.define('ah-shopping-card',AhShoppingCard);
 window.customCards=window.customCards||[];
