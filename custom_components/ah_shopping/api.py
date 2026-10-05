@@ -12,12 +12,12 @@ from aiohttp import ClientError, ClientResponse, ClientSession
 
 from .const import (
     API_BASE_URL, APPLICATION, BASE_FULFILLMENTS_QUERY, CLIENT_ID,
-    CLIENT_VERSION, LOGIN_BASE_URL, SHOPPINGLIST_ITEMS_PATH,
-    SHOPPINGLIST_ITEMS_READ_PATH,
+    CLIENT_VERSION, LOGIN_BASE_URL, NEXT_ORDER_FULFILLMENTS_QUERY,
+    SHOPPINGLIST_ITEMS_PATH, SHOPPINGLIST_ITEMS_READ_PATH,
     TOKEN_REFRESH_MARGIN, USER_AGENT,
 )
 from .exceptions import AhAuthError, AhNotFoundError, AhRequestError, AhTransientError
-from .models import Product, ShoppingItem, ShoppingListData
+from .models import NextOrderData, NextOrderItem, Product, ShoppingItem, ShoppingListData
 
 TokenUpdateCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -229,6 +229,101 @@ class AhShoppingApiClient:
     async def async_validate_connection(self) -> None:
         # Deliberately identical to Albert Heijn Delivery's login validation.
         await self._graphql(BASE_FULFILLMENTS_QUERY)
+
+    async def async_get_next_order(self) -> NextOrderData:
+        """Return the earliest open scheduled AH order and its product lines."""
+        data = await self._graphql(NEXT_ORDER_FULFILLMENTS_QUERY)
+        fulfillments = (data.get("orderFulfillments") or {}).get("result") or []
+        if not isinstance(fulfillments, list):
+            return NextOrderData()
+
+        candidates = [
+            item for item in fulfillments
+            if isinstance(item, dict) and int(item.get("orderId") or 0) > 0
+        ]
+        if not candidates:
+            return NextOrderData()
+
+        def order_key(item: dict[str, Any]) -> tuple[str, str, int]:
+            slot = ((item.get("delivery") or {}).get("slot") or {})
+            return (
+                str(slot.get("date") or "9999-12-31"),
+                str(slot.get("startTime") or "99:99"),
+                int(item.get("orderId") or 0),
+            )
+
+        fulfillment = min(candidates, key=order_key)
+        order_id = int(fulfillment.get("orderId") or 0)
+        detail = await self._raw_request(
+            "GET", f"/mobile-services/order/v1/{order_id}/details-grouped-by-taxonomy"
+        )
+        if not isinstance(detail, dict):
+            raise AhTransientError("Unexpected AH order details response")
+
+        items: list[NextOrderItem] = []
+        groups = detail.get("groupedProductsInTaxonomy") or []
+        if isinstance(groups, list):
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                taxonomy = str(group.get("taxonomyName") or "")
+                ordered = group.get("orderedProducts") or []
+                if not isinstance(ordered, list):
+                    continue
+                for raw in ordered:
+                    if not isinstance(raw, dict):
+                        continue
+                    product = raw.get("product") or {}
+                    if not isinstance(product, dict):
+                        continue
+
+                    def money(value: Any) -> float:
+                        while isinstance(value, dict):
+                            value = value.get("amount")
+                        try:
+                            return float(value) if value is not None else 0.0
+                        except (TypeError, ValueError):
+                            return 0.0
+
+                    before = money(product.get("priceBeforeBonus"))
+                    current = money(product.get("currentPrice"))
+                    if current <= 0:
+                        current = before
+                    quantity = max(0, int(raw.get("quantity") or raw.get("amount") or 0))
+                    items.append(
+                        NextOrderItem(
+                            product_id=int(product.get("webshopId") or product.get("id") or 0),
+                            title=str(product.get("title") or product.get("description") or ""),
+                            quantity=quantity,
+                            brand=str(product.get("brand") or ""),
+                            unit_size=str(product.get("salesUnitSize") or ""),
+                            price_now=current,
+                            price_was=before,
+                            is_bonus=bool(product.get("isBonus")),
+                            bonus_mechanism=str(product.get("bonusMechanism") or ""),
+                            taxonomy=taxonomy,
+                        )
+                    )
+
+        delivery = fulfillment.get("delivery") or {}
+        slot = delivery.get("slot") or {}
+        total_price = money(
+            ((fulfillment.get("totalPrice") or {}).get("totalPrice") or {}).get("amount")
+        )
+        return NextOrderData(
+            order_id=order_id,
+            status=str(fulfillment.get("statusDescription") or delivery.get("status") or ""),
+            shopping_type=str(fulfillment.get("shoppingType") or ""),
+            modifiable=bool(fulfillment.get("modifiable")),
+            delivery_method=str(delivery.get("method") or ""),
+            delivery_date=str(slot.get("date") or ""),
+            delivery_date_display=str(slot.get("dateDisplay") or ""),
+            delivery_time_display=str(slot.get("timeDisplay") or ""),
+            delivery_start_time=str(slot.get("startTime") or ""),
+            delivery_end_time=str(slot.get("endTime") or ""),
+            total_price=total_price,
+            items=tuple(items),
+        )
 
     async def async_get_list_payload(self) -> dict[str, Any]:
         data = await self._raw_request("GET", SHOPPINGLIST_ITEMS_READ_PATH)
