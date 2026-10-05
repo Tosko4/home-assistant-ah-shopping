@@ -1,0 +1,39 @@
+name: Bootstrap AH Shopping repository
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".bootstrap/repo.zip.b64"
+      - ".github/workflows/bootstrap.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack repository bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .bootstrap/repo.zip.b64
+          base64 -d .bootstrap/repo.zip.b64 > /tmp/ah-shopping.zip
+          rm -rf /tmp/ah-shopping
+          mkdir -p /tmp/ah-shopping
+          unzip -q /tmp/ah-shopping.zip -d /tmp/ah-shopping
+          rsync -a --delete             --exclude='.git/'             /tmp/ah-shopping/home-assistant-ah-shopping/ ./
+
+      - name: Commit repository contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add AH Shopping v0.1.0"
+          git push
