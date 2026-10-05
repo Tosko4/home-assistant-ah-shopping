@@ -327,6 +327,27 @@ class AhShoppingApiClient:
             items=tuple(items),
         )
 
+    async def async_set_cart_product_quantity(
+        self,
+        product_id: int,
+        quantity: int,
+        *,
+        description: str = "",
+    ) -> None:
+        """Set an absolute quantity in the current active AH cart."""
+        item = {
+            "productId": int(product_id),
+            "quantity": max(0, int(quantity)),
+            "originCode": "PRD",
+            "description": description,
+            "strikethrough": False,
+        }
+        await self._raw_request(
+            "PUT",
+            "/mobile-services/order/v1/items?sortBy=DEFAULT",
+            json_body={"items": [item]},
+        )
+
     async def async_get_active_cart(self) -> ActiveCartData:
         """Return the current active AH cart/order summary."""
         try:
