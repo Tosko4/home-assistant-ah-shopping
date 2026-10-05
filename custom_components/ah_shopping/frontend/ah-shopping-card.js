@@ -10,42 +10,55 @@ class AhShoppingCard extends HTMLElement {
     {name:'show_scan',selector:{boolean:{}}},
     {name:'show_products',selector:{boolean:{}}},
     {name:'product_source',selector:{select:{options:[
-      {value:'shopping_list',label:'Boodschappenlijst'},
-      {value:'cart',label:'Winkelmandje'},
+      {value:'shopping_list',label:'Winkelmandje'},
       {value:'next_order',label:'Volgende bestelling'},
-      {value:'cart_and_order',label:'Winkelmandje + volgende bestelling'}
+      {value:'shopping_list_and_order',label:'Winkelmandje + volgende bestelling'}
     ]}}},
-    {name:'height',selector:{number:{min:160,max:1200,step:10,mode:'box',unit_of_measurement:'px'}}},
     {name:'scan_label',selector:{text:{}}}
   ]};}
   setConfig(config){
     const legacyScanOnly=config.mode==='scan_only';
+    const legacySource=config.product_source==='cart'
+      ? 'shopping_list'
+      : config.product_source==='cart_and_order'
+        ? 'shopping_list_and_order'
+        : config.product_source;
+    const {height:_legacyHeight,...cleanConfig}=config;
     this._config={
       show_header:legacyScanOnly?false:true,
       show_scan:true,
       show_products:legacyScanOnly?false:true,
       product_source:'shopping_list',
       scan_label:'Scan product',
-      ...config
+      ...cleanConfig,
+      ...(legacySource?{product_source:legacySource}:{})
     };
     this._render();
   }
   set hass(hass){
     this._hass=hass;
-    const entities=[this._entity(),this._cartEntity(),this._orderEntity()].filter(Boolean);
+    const entities=[this._entity(),this._orderEntity()].filter(Boolean);
     const sig=entities.map(e=>`${e.entity_id}|${e.last_updated}`).join(';')||'none';
     if(sig!==this._lastEntitySig){this._lastEntitySig=sig;if(!this._scanner)this._render();}
   }
   getCardSize(){
-    if(this._config.show_products===false&&this._config.show_header===false)return this._config.show_scan===false?1:1;
+    if(this._config.show_products===false&&this._config.show_header===false)return 1;
     return 7;
   }
+  getGridOptions(){
+    const compact=this._config.show_products===false;
+    return {
+      columns:12,
+      rows:compact?2:6,
+      min_columns:6,
+      min_rows:compact?1:2
+    };
+  }
   _entity(){if(!this._hass)return null;if(this._config.entity&&this._hass.states[this._config.entity])return this._hass.states[this._config.entity];return Object.values(this._hass.states).find(s=>s.attributes?.ah_shopping_list===true)||null;}
-  _cartEntity(){if(!this._hass)return null;return Object.values(this._hass.states).find(s=>s.attributes?.ah_active_cart===true)||null;}
   _orderEntity(){if(!this._hass)return null;return Object.values(this._hass.states).find(s=>s.attributes?.ah_next_order===true)||null;}
-  _combinedItems(cartItems,orderItems){
+  _combinedItems(listItems,orderItems){
     const map=new Map();
-    for(const [source,items] of [['Winkelmandje',cartItems],['Bestelling',orderItems]]){
+    for(const [source,items] of [['Winkelmandje',listItems],['Bestelling',orderItems]]){
       for(const raw of items||[]){
         const key=raw.product_id>0?`p:${raw.product_id}`:`t:${String(raw.title||'').toLowerCase()}`;
         const existing=map.get(key);
@@ -64,20 +77,48 @@ class AhShoppingCard extends HTMLElement {
   _viewData(){
     const source=this._config.product_source||'shopping_list';
     const list=this._entity()?.attributes||{};
-    const cart=this._cartEntity()?.attributes||{};
     const order=this._orderEntity()?.attributes||{};
 
-    if(source==='cart'){
-      return {items:cart.items||[],total_quantity:cart.total_quantity||0,total_price:cart.total_price||0,unique_items:cart.unique_items||0,label:'Winkelmandje',read_only:false,edit_source:'cart',entity:this._cartEntity(),pending_changes:cart.pending_changes||0};
-    }
     if(source==='next_order'){
-      return {items:order.items||[],total_quantity:order.total_quantity||0,total_price:order.total_price||0,unique_items:order.unique_items||0,label:'Volgende bestelling',read_only:true,entity:this._orderEntity(),delivery:order.delivery_date_display||order.delivery_date||'',time:order.delivery_time_display||''};
+      return {
+        items:order.items||[],
+        total_quantity:order.total_quantity||0,
+        total_price:order.total_price||0,
+        unique_items:order.unique_items||0,
+        label:'Volgende bestelling',
+        edit_source:null,
+        entity:this._orderEntity(),
+        delivery:order.delivery_date_display||order.delivery_date||'',
+        time:order.delivery_time_display||''
+      };
     }
-    if(source==='cart_and_order'){
-      const items=this._combinedItems(cart.items||[],order.items||[]);
-      return {items,total_quantity:items.reduce((sum,i)=>sum+Number(i.quantity||0),0),total_price:Number(cart.total_price||0)+Number(order.total_price||0),unique_items:items.length,label:'Winkelmandje + bestelling',read_only:true,entity:this._cartEntity()||this._orderEntity(),delivery:order.delivery_date_display||order.delivery_date||'',time:order.delivery_time_display||''};
+
+    if(source==='shopping_list_and_order'){
+      const items=this._combinedItems(list.items||[],order.items||[]);
+      return {
+        items,
+        total_quantity:items.reduce((sum,i)=>sum+Number(i.quantity||0),0),
+        total_price:Number(list.estimated_total||0)+Number(order.total_price||0),
+        unique_items:items.length,
+        label:'Winkelmandje + bestelling',
+        edit_source:null,
+        entity:this._entity()||this._orderEntity(),
+        delivery:order.delivery_date_display||order.delivery_date||'',
+        time:order.delivery_time_display||''
+      };
     }
-    return {items:list.items||[],total_quantity:list.total_quantity||0,total_price:list.estimated_total||0,unique_items:list.unique_items||0,label:'Boodschappenlijst',read_only:false,edit_source:'shopping_list',entity:this._entity(),bonus_savings:list.bonus_savings||0,pending_changes:list.pending_changes||0};
+
+    return {
+      items:list.items||[],
+      total_quantity:list.total_quantity||0,
+      total_price:list.estimated_total||0,
+      unique_items:list.unique_items||0,
+      label:'Winkelmandje',
+      edit_source:'shopping_list',
+      entity:this._entity(),
+      bonus_savings:list.bonus_savings||0,
+      pending_changes:list.pending_changes||0
+    };
   }
   _esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   _money(n){return new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'}).format(Number(n||0));}
@@ -102,9 +143,8 @@ class AhShoppingCard extends HTMLElement {
     const worker=(async()=>{
       while(this._pendingQty.has(key)){
         const target=this._pendingQty.get(key);
-        const service=source==='cart'?'set_cart_quantity':'set_quantity';
         try{
-          await this._service(service,{product_id:pid,quantity:target});
+          await this._service('set_quantity',{product_id:pid,quantity:target});
         }catch(e){
           this._pendingQty.delete(key);
           this._toast(e.message||String(e),true);
@@ -135,10 +175,7 @@ class AhShoppingCard extends HTMLElement {
     const showScan=this._config.show_scan!==false;
     const showProducts=this._config.show_products!==false;
     const scanLabel=this._config.scan_label||'Scan product';
-    const configuredHeight=Number(this._config.height||0);
-    const fixedHeight=showProducts&&Number.isFinite(configuredHeight)&&configuredHeight>=160?Math.round(configuredHeight):0;
-    const cardClass=fixedHeight?'fullCard fixedHeight':'fullCard';
-    const cardStyle=fixedHeight?`height:${fixedHeight}px;`:'';
+    const cardClass='fullCard';
     const syncText=view.pending_changes? ` · ${view.pending_changes} wijziging${view.pending_changes===1?'':'en'} bezig` : '';
     const sourceText=view.delivery?`${view.label} · ${view.delivery}${view.time?` · ${view.time}`:''}`:view.label;
     const totalNote=view.bonus_savings? `Bonus −${this._money(view.bonus_savings)}` : sourceText;
@@ -153,7 +190,7 @@ class AhShoppingCard extends HTMLElement {
       ? `<div class="items">${items.length?items.map(i=>this._item(i,view.edit_source||null)).join(''):`<div class="empty">Geen producten in ${this._esc(view.label.toLowerCase())}.</div>`}</div>`
       : '';
 
-    this.shadowRoot.innerHTML=`<style>${this._css()}</style><ha-card class="${cardClass}" style="${cardStyle}">${header}${!entity&&showProducts?'<div class="empty">Deze gegevensbron is nog niet beschikbaar.</div>':''}${scan}${products}${this._message?`<div class="toast ${this._messageError?'error':''}">${this._esc(this._message)}</div>`:''}</ha-card>`;
+    this.shadowRoot.innerHTML=`<style>${this._css()}</style><ha-card class="${cardClass}">${header}${!entity&&showProducts?'<div class="empty">Deze gegevensbron is nog niet beschikbaar.</div>':''}${scan}${products}${this._message?`<div class="toast ${this._messageError?'error':''}">${this._esc(this._message)}</div>`:''}</ha-card>`;
 
     this.shadowRoot.querySelector('#scan')?.addEventListener('click',()=>this._openScanner());
     this.shadowRoot.querySelectorAll('[data-minus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(el.dataset.source,Number(el.dataset.pid),Number(el.dataset.qty),-1)));
@@ -509,7 +546,7 @@ class AhShoppingCard extends HTMLElement {
 
   disconnectedCallback(){this._closeScanner();}
 
-  _css(){return `:host{display:block}ha-card{overflow:hidden}.fullCard.fixedHeight{display:flex;flex-direction:column}.fullCard.fixedHeight .head,.fullCard.fixedHeight .scanArea{flex:0 0 auto}.fullCard.fixedHeight .items{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}.scanArea{padding:0 18px 14px}.scanWide{display:block;width:100%;min-height:48px;font-size:16px}.head{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 18px 12px}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.scanner{position:fixed;z-index:10000;inset:0;background:#000e;display:grid;place-items:center;padding:12px}.scanbox{width:min(1120px,100%);max-height:calc(100vh - 24px);background:var(--card-background-color);border-radius:16px;overflow:auto}.scanhead{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:18px}.scanhead button{font-size:24px}.scanbody{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.8fr);min-height:0}.scanCameraPane{min-width:0;border-right:1px solid var(--divider-color)}.videoWrap{position:relative;background:#000;aspect-ratio:4/3}.videoWrap video{width:100%;height:100%;object-fit:cover}.guide{position:absolute;left:8%;right:8%;top:35%;height:30%;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 9999px #0005}.guide:after{content:'';position:absolute;left:5%;right:5%;top:50%;height:2px;background:#f33}.scanbuttons{display:flex;gap:8px;justify-content:center;padding:12px}.scanbuttons button{min-width:130px}#scanstatus{text-align:center;padding:10px 12px 0;color:var(--secondary-text-color)}.scanResult{padding:18px;display:flex;flex-direction:column;justify-content:center}.scanPlaceholder{text-align:center;color:var(--secondary-text-color);padding:32px 10px}.scanPlaceholder span{display:block;font-size:38px;margin-bottom:8px}.scanPlaceholder b{display:block;color:var(--primary-text-color);margin-bottom:5px}.scanSuccess{font-weight:800;color:#00a03c;margin-bottom:12px}.scanProduct{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center}.scanProduct img,.scanPh{width:92px;height:92px;object-fit:contain;border-radius:12px;background:var(--secondary-background-color)}.scanPh{display:grid;place-items:center;font-size:32px}.scanProductInfo b{display:block;font-size:18px;line-height:1.25}.scanPrice{font-size:25px;font-weight:800;margin-top:7px}.scanPrice s{font-size:13px;font-weight:400;color:var(--secondary-text-color)}.scanBonus{display:inline-block;margin-top:6px;padding:3px 7px;border-radius:6px;background:#00a03c;color:#fff;font-size:11px;font-weight:800}.scanQtyRow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px;padding-top:15px;border-top:1px solid var(--divider-color)}.scanQty{display:flex;align-items:center;gap:8px}.scanQty button{width:44px;height:44px;padding:0;font-size:25px}.scanQty strong{min-width:34px;text-align:center;font-size:20px}.scanHint{margin-top:14px;line-height:1.35}.scanError{margin-bottom:10px;padding:8px 10px;border-radius:8px;background:var(--error-color,#c62828);color:#fff;font-size:12px}@media(max-width:800px){.scanbox{width:min(720px,100%)}.scanbody{grid-template-columns:1fr}.scanCameraPane{border-right:0;border-bottom:1px solid var(--divider-color)}.scanResult{min-height:210px}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
+  _css(){return `:host{display:block;height:100%}ha-card{overflow:hidden}.fullCard{height:100%;min-height:160px;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}.scanArea{padding:0 18px 14px}.scanWide{display:block;width:100%;min-height:48px;font-size:16px}.head{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 18px 12px}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.scanner{position:fixed;z-index:10000;inset:0;background:#000e;display:grid;place-items:center;padding:12px}.scanbox{width:min(1120px,100%);max-height:calc(100vh - 24px);background:var(--card-background-color);border-radius:16px;overflow:auto}.scanhead{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:18px}.scanhead button{font-size:24px}.scanbody{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.8fr);min-height:0}.scanCameraPane{min-width:0;border-right:1px solid var(--divider-color)}.videoWrap{position:relative;background:#000;aspect-ratio:4/3}.videoWrap video{width:100%;height:100%;object-fit:cover}.guide{position:absolute;left:8%;right:8%;top:35%;height:30%;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 9999px #0005}.guide:after{content:'';position:absolute;left:5%;right:5%;top:50%;height:2px;background:#f33}.scanbuttons{display:flex;gap:8px;justify-content:center;padding:12px}.scanbuttons button{min-width:130px}#scanstatus{text-align:center;padding:10px 12px 0;color:var(--secondary-text-color)}.scanResult{padding:18px;display:flex;flex-direction:column;justify-content:center}.scanPlaceholder{text-align:center;color:var(--secondary-text-color);padding:32px 10px}.scanPlaceholder span{display:block;font-size:38px;margin-bottom:8px}.scanPlaceholder b{display:block;color:var(--primary-text-color);margin-bottom:5px}.scanSuccess{font-weight:800;color:#00a03c;margin-bottom:12px}.scanProduct{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center}.scanProduct img,.scanPh{width:92px;height:92px;object-fit:contain;border-radius:12px;background:var(--secondary-background-color)}.scanPh{display:grid;place-items:center;font-size:32px}.scanProductInfo b{display:block;font-size:18px;line-height:1.25}.scanPrice{font-size:25px;font-weight:800;margin-top:7px}.scanPrice s{font-size:13px;font-weight:400;color:var(--secondary-text-color)}.scanBonus{display:inline-block;margin-top:6px;padding:3px 7px;border-radius:6px;background:#00a03c;color:#fff;font-size:11px;font-weight:800}.scanQtyRow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px;padding-top:15px;border-top:1px solid var(--divider-color)}.scanQty{display:flex;align-items:center;gap:8px}.scanQty button{width:44px;height:44px;padding:0;font-size:25px}.scanQty strong{min-width:34px;text-align:center;font-size:20px}.scanHint{margin-top:14px;line-height:1.35}.scanError{margin-bottom:10px;padding:8px 10px;border-radius:8px;background:var(--error-color,#c62828);color:#fff;font-size:12px}@media(max-width:800px){.scanbox{width:min(720px,100%)}.scanbody{grid-template-columns:1fr}.scanCameraPane{border-right:0;border-bottom:1px solid var(--divider-color)}.scanResult{min-height:210px}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
 }
 if(!customElements.get('ah-shopping-card'))customElements.define('ah-shopping-card',AhShoppingCard);
 window.customCards=window.customCards||[];
