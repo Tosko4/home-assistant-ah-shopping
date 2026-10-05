@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.6
+## 0.2.7
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -73,7 +73,7 @@ product_source: next_order               # eerstvolgende ingeplande bestelling, 
 product_source: shopping_list_and_order  # Winkelmandje + volgende bestelling, read-only
 ```
 
-The combined view merges identical products by product id but keeps the two source quantities separate. The **Winkelmandje** portion of a combined row remains editable with +/-/remove; the **Bestelling** portion is always read-only. The scanner and all editable actions write to **Winkelmandje**, which is technically AH "Mijn lijst". The scheduled order is never modified.
+The combined view merges identical products by product id but keeps the two source quantities separate. The displayed quantity is the combined total. The **Bestelling** quantity is a hard read-only minimum: minus only removes extra Winkelmandje quantity and disappears when the total reaches the ordered quantity. Plus is always available for product rows and adds one to Winkelmandje, including products that currently exist only in the scheduled order. The scheduled order is never modified.
 
 For backwards compatibility, old `product_source: cart` cards automatically map to `shopping_list`, and old `cart_and_order` cards map to `shopping_list_and_order`.
 
@@ -283,3 +283,15 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Makes the combined Winkelmandje + bestelling view partially editable: only the Winkelmandje quantity can be changed; order quantity remains read-only.
 - Combined rows now retain separate Winkelmandje and Bestelling quantities even when the same product exists in both.
 - Makes combined-list rows more compact with smaller images, reduced spacing and compact source labels.
+
+
+### 0.2.7
+
+- Treats the scheduled-order quantity as the hard minimum in the combined list.
+- Combined rows now display the total quantity: ordered + Winkelmandje.
+- Minus only decreases the Winkelmandje quantity and disappears when the total reaches the ordered quantity.
+- Plus remains available at the order minimum and adds the product to Winkelmandje.
+- Removes the combined-row delete button so an order quantity can never be confused with an editable quantity.
+- Shows a compact breakdown such as `2 besteld · 1 extra`.
+- Allows setting a positive Winkelmandje quantity for a product that exists only in the order by resolving its product details first.
+- Aligns the scanned-product panel to the top of the scanner and uses the same compact row styling as the normal product list.
