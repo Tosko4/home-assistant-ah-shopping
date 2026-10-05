@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.11
+## MVP 0.1.12
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -72,7 +72,7 @@ For a quick camera test, use EAN-13 `8710400169468` (AH Biologisch Halfvolle mel
 
 Camera access uses `navigator.mediaDevices.getUserMedia()` on the device displaying the dashboard. HTTPS is strongly recommended and may be required by the browser/WebView. On Android/Fully Kiosk, allow camera permission for Fully Kiosk. On iPhone/iPad, allow camera permission for the browser/Home Assistant WebView.
 
-The MVP scanner intentionally supports grocery-style **EAN-13 and EAN-8** only. This keeps the integration self-contained with no external barcode JavaScript runtime.
+The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses the browser's native BarcodeDetector when available, then ZXing 0.23.0 as the main fallback, and finally the bundled lightweight EAN decoder as a last-resort fallback.
 
 ## Entities
 
@@ -150,3 +150,12 @@ The MVP scanner intentionally supports grocery-style **EAN-13 and EAN-8** only. 
 - Quantity changes no longer wait for the full shopping-list/product refresh.
 - After a successful AH PATCH, Home Assistant updates the local coordinator immediately and refreshes the complete list in the background.
 - The dashboard card keeps a per-product pending quantity and serialises rapid +/- clicks, so repeated taps are not ignored while a previous write is in flight.
+
+
+### 0.1.12
+
+- Adds ZXing 0.23.0 as the primary barcode fallback for browsers without native BarcodeDetector, including Microsoft Edge contexts where BarcodeDetector is unavailable.
+- Scanner order is now: native BarcodeDetector → ZXing → bundled lightweight EAN fallback.
+- ZXing reuses the already-open camera feed; it does not request a second camera session.
+- Scanner status shows whether native, ZXing or local fallback is active and counts processed frames.
+- Prevents duplicate custom-element registration if Home Assistant loads the card module twice.
