@@ -254,6 +254,17 @@ class AhShoppingApiClient:
             return []
         return [Product.from_api(p) for p in raw if isinstance(p, dict)]
 
+    async def async_get_product_detail(self, product_id: int) -> Product:
+        raw = await self._raw_request(
+            "GET", f"/mobile-services/product/detail/v4/fir/{int(product_id)}"
+        )
+        if not isinstance(raw, dict):
+            raise AhNotFoundError("No AH product details found")
+        product = Product.from_api(raw)
+        if product.id <= 0:
+            raise AhNotFoundError("No AH product details found")
+        return product
+
     async def async_search_products(self, query: str, limit: int = 8) -> list[Product]:
         params = urlencode({"query": query, "page": 0, "size": max(1, min(limit, 20)), "sortOn": "RELEVANCE"})
         raw = await self._raw_request("GET", f"/mobile-services/product/search/v2?{params}")
@@ -363,11 +374,23 @@ class AhShoppingApiClient:
                 item_id = f"text-{raw.get('position', position)}-{description}"
 
             product = products.get(product_id)
-            if product is None and product_id > 0:
+            if product_id > 0 and (product is None or product.price_now <= 0):
                 # Products that are no longer orderable can be omitted from the
-                # bulk product endpoint while still having current product data
-                # in the user's shopping-list response.
-                product = product_from_list_item(raw, product_id)
+                # bulk endpoint. First use the data embedded in the user's list.
+                list_product = product_from_list_item(raw, product_id)
+                if list_product is not None and list_product.price_now > 0:
+                    product = list_product
+                else:
+                    # As a final fallback, ask the product-detail endpoint. This
+                    # keeps discontinued/unorderable list items from becoming €0.
+                    try:
+                        detail_product = await self.async_get_product_detail(product_id)
+                    except (AhNotFoundError, AhRequestError, AhTransientError):
+                        detail_product = None
+                    if detail_product is not None and detail_product.price_now > 0:
+                        product = detail_product
+                    elif product is None:
+                        product = list_product
 
             parsed_items.append(
                 ShoppingItem(
