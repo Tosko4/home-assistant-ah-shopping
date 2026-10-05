@@ -427,7 +427,12 @@ class AhShoppingCard extends HTMLElement {
     };
 
     if(isAndroid){
-      if(await tryZXing())return;
+      if(await tryZXing()){
+        const primary=this._decoderMode;
+        await tryNative();
+        this._decoderMode=primary;
+        return;
+      }
       if(await tryNative())return;
     }else{
       if(await tryNative())return;
@@ -498,7 +503,11 @@ class AhShoppingCard extends HTMLElement {
             (window.ZXing?.FormatException&&e instanceof window.ZXing.FormatException);
           if(!expected)console.debug('AH Shopping ZXing crop error',e);
         }
-      }else if(this._decoderMode==='native'&&this._barcodeDetector){
+      }
+
+      // Native BarcodeDetector is a secondary cropped fallback on Android,
+      // or the primary engine on platforms where it performs well.
+      if(!code&&this._barcodeDetector){
         try{
           const found=await this._barcodeDetector.detect(c);
           const hit=(found||[]).find(x=>x?.rawValue);
@@ -506,7 +515,7 @@ class AhShoppingCard extends HTMLElement {
         }catch(e){}
       }
 
-      // Lightweight local EAN decoder is also tried on the same crop when the main engine misses.
+      // Lightweight local EAN decoder is also tried on the same crop when the main engines miss.
       if(!code){
         try{
           code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));
