@@ -28,5 +28,19 @@
     "abort": {
       "already_configured": "This Albert Heijn account is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Shopping list settings",
+        "description": "Configure how often Home Assistant fully polls the AH list. Writes are applied immediately and reconciled automatically in between.",
+        "data": {
+          "update_interval_minutes": "Full update interval (minutes)"
+        },
+        "data_description": {
+          "update_interval_minutes": "1–60 minutes. Default 5."
+        }
+      }
+    }
   }
 }
