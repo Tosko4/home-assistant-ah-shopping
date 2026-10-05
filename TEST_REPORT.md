@@ -1,9 +1,9 @@
-# AH Shopping 0.1.2 – test report
+# AH Shopping 0.1.3 – test report
 
 Verified locally on the MVP source tree:
 
 - `python -m compileall -q custom_components/ah_shopping` — PASS
-- `pytest -q` — PASS (`6 passed`)
+- `pytest -q` — PASS (`8 passed`)
 - JavaScript syntax check for `frontend/ean-decoder.js` — PASS
 - JavaScript syntax check for `frontend/ah-shopping-card.js` — PASS
 - JSON parse check for manifest, HACS metadata, strings and translations — PASS
@@ -15,7 +15,6 @@ Verified locally on the MVP source tree:
 
 Not claimed as tested yet:
 
-- Live authenticated Albert Heijn API calls against the user's account
 - Physical camera behavior in Fully Kiosk on the Lenovo Tab M10
 - Physical camera behavior in the iPhone Home Assistant app/Safari
 - Exact checkout-equivalent total for multi-buy Bonus promotions

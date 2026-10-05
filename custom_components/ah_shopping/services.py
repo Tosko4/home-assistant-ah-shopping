@@ -81,7 +81,9 @@ async def _remove(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     item=rt.coordinator.data.item_for_product(pid)
     try:
         if item:
-            await rt.client.async_delete_items(rt.coordinator.data.list_id, [item.item_id])
+            await rt.client.async_set_product_quantity(
+                rt.coordinator.data.list_id, pid, 0
+            )
             await _refresh(rt)
         return {"success":True, "product_id":pid}
     except AhShoppingError as err:

@@ -11,39 +11,14 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 from aiohttp import ClientError, ClientResponse, ClientSession
 
 from .const import (
-    API_BASE_URL, APPLICATION, CLIENT_ID, CLIENT_VERSION, LOGIN_BASE_URL,
+    API_BASE_URL, APPLICATION, BASE_FULFILLMENTS_QUERY, CLIENT_ID,
+    CLIENT_VERSION, LOGIN_BASE_URL, SHOPPINGLIST_ITEMS_PATH,
     TOKEN_REFRESH_MARGIN, USER_AGENT,
 )
 from .exceptions import AhAuthError, AhNotFoundError, AhRequestError, AhTransientError
 from .models import Product, ShoppingItem, ShoppingListData
 
 TokenUpdateCallback = Callable[[dict[str, Any]], Awaitable[None]]
-
-_MEMBER_QUERY = """query MemberForShopping { member { id } }"""
-_LIST_QUERY = """query FavoriteListV2($ids: [String!]!) {
-  favoriteListV2(ids: $ids) {
-    id
-    description
-    totalSize
-    items { id productId quantity }
-  }
-}"""
-_ADD_PRODUCTS_MUTATION = """mutation AddProductsToFavoriteList(
-  $favoriteListId: String!, $products: [FavoriteListProductMutation!]!
-) {
-  favoriteListProductsAddV2(id: $favoriteListId, products: $products) {
-    status
-    errorMessage
-  }
-}"""
-_DELETE_PRODUCTS_MUTATION = """mutation DeleteProductsFromFavoriteList(
-  $favoriteListId: String!, $itemIds: [String!]!
-) {
-  favoriteListProductsDeleteV2(id: $favoriteListId, itemIds: $itemIds) {
-    status
-    errorMessage
-  }
-}"""
 
 
 class AhShoppingApiClient:
@@ -251,21 +226,19 @@ class AhShoppingApiClient:
         return data
 
     async def async_validate_connection(self) -> None:
-        # Validate only the shopping-list endpoint the integration actually needs.
-        # The previous extra member GraphQL probe could reject a valid login even
-        # though shopping-list access itself was working.
-        await self.async_get_lists()
+        # Deliberately identical to Albert Heijn Delivery's login validation.
+        await self._graphql(BASE_FULFILLMENTS_QUERY)
 
-    async def async_get_lists(self) -> list[dict[str, Any]]:
-        result = await self._raw_request("GET", "/mobile-services/lists/v3/lists?productId=1")
-        return result if isinstance(result, list) else []
+    async def async_get_list_payload(self) -> dict[str, Any]:
+        data = await self._raw_request("GET", SHOPPINGLIST_ITEMS_PATH)
+        if not isinstance(data, dict):
+            raise AhTransientError("Unexpected AH shopping-list response")
+        return data
 
-    async def async_get_list_items(self, list_id: str) -> list[dict[str, Any]]:
-        data = await self._graphql(_LIST_QUERY, {"ids": [list_id.upper()]})
-        lists = data.get("favoriteListV2") or []
-        if not isinstance(lists, list) or not lists:
-            return []
-        items = lists[0].get("items") or []
+    async def async_get_list_items(self, list_id: str = "") -> list[dict[str, Any]]:
+        del list_id
+        data = await self.async_get_list_payload()
+        items = data.get("items") or []
         return items if isinstance(items, list) else []
 
     async def async_get_products(self, product_ids: list[int]) -> list[Product]:
@@ -301,57 +274,60 @@ class AhShoppingApiClient:
             raise AhNotFoundError("No AH product found for this barcode")
         return product
 
-    async def async_set_product_quantity(self, list_id: str, product_id: int, quantity: int) -> None:
-        quantity = int(quantity)
-        if quantity <= 0:
-            raw_items = await self.async_get_list_items(list_id)
-            item_ids = [
-                str(item.get("id")) for item in raw_items
-                if int(item.get("productId") or 0) == product_id and item.get("id")
-            ]
-            if item_ids:
-                await self.async_delete_items(list_id, item_ids)
-            return
-        data = await self._graphql(
-            _ADD_PRODUCTS_MUTATION,
-            {"favoriteListId": list_id.upper(), "products": [{"productId": product_id, "quantity": quantity}]},
+    async def async_set_product_quantity(
+        self, list_id: str, product_id: int, quantity: int
+    ) -> None:
+        # "Mijn lijst" is account-wide in shoppinglist v2; list_id is kept in the
+        # public method signature so the rest of the integration remains stable.
+        del list_id
+        item = {
+            "description": "",
+            "productId": int(product_id),
+            "quantity": max(0, int(quantity)),
+            "type": "SHOPPABLE",
+            "originCode": "PRD",
+            "searchTerm": "",
+            "strikeThrough": False,
+        }
+        await self._raw_request(
+            "PATCH", SHOPPINGLIST_ITEMS_PATH, json_body={"items": [item]}
         )
-        result = data.get("favoriteListProductsAddV2") or {}
-        if result.get("status") != "SUCCESS":
-            raise AhRequestError(str(result.get("errorMessage") or "Could not update shopping list"))
-
-    async def async_delete_items(self, list_id: str, item_ids: list[str]) -> None:
-        if not item_ids:
-            return
-        data = await self._graphql(
-            _DELETE_PRODUCTS_MUTATION,
-            {"favoriteListId": list_id.upper(), "itemIds": item_ids},
-        )
-        result = data.get("favoriteListProductsDeleteV2") or {}
-        if result.get("status") != "SUCCESS":
-            raise AhRequestError(str(result.get("errorMessage") or "Could not remove shopping list item"))
 
     async def async_get_shopping_data(self) -> ShoppingListData:
-        lists = await self.async_get_lists()
-        if not lists:
-            raise AhRequestError("No AH shopping lists found")
-        default = lists[0]
-        list_id = str(default.get("id", ""))
-        raw_items = await self.async_get_list_items(list_id)
-        product_ids = [int(i.get("productId") or 0) for i in raw_items if int(i.get("productId") or 0) > 0]
-        products = {p.id: p for p in await self.async_get_products(list(dict.fromkeys(product_ids)))}
+        data = await self.async_get_list_payload()
+        raw_items = data.get("items") or []
+        if not isinstance(raw_items, list):
+            raw_items = []
+
+        product_ids = [
+            int(item.get("productId") or 0)
+            for item in raw_items
+            if isinstance(item, dict) and int(item.get("productId") or 0) > 0
+        ]
+        products = {
+            product.id: product
+            for product in await self.async_get_products(
+                list(dict.fromkeys(product_ids))
+            )
+        }
+
         items = tuple(
             ShoppingItem(
-                item_id=str(raw.get("id", "")),
+                item_id=str(
+                    raw.get("listItemId")
+                    or raw.get("id")
+                    or f"product-{int(raw.get('productId') or 0)}"
+                ),
                 product_id=int(raw.get("productId") or 0),
                 quantity=max(1, int(raw.get("quantity") or 1)),
                 product=products.get(int(raw.get("productId") or 0)),
             )
             for raw in raw_items
-            if int(raw.get("productId") or 0) > 0
+            if isinstance(raw, dict) and int(raw.get("productId") or 0) > 0
         )
+
         return ShoppingListData(
-            list_id=list_id,
-            name=str(default.get("description") or "Boodschappenlijst"),
+            list_id=str(data.get("id") or "my-list"),
+            name="Boodschappenlijst",
             items=items,
         )

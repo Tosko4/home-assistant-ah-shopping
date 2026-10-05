@@ -1,9 +1,10 @@
 {
+  "title": "Albert Heijn Shopping",
   "config": {
     "step": {
       "user": {
         "title": "Albert Heijn koppelen",
-        "description": "Open deze Albert Heijn-login-URL in je browser: {login_url}\\n\\nLog in bij Albert Heijn. Wanneer de browser doorstuurt naar appie://login-exit, kopieer je de authorization code of volledige redirect-URL en plak je die hieronder. Authorization codes zijn eenmalig; vraag bij iedere poging een nieuwe code op.",
+        "description": "Open deze Albert Heijn-login-URL in je browser: {login_url}\n\nLog in bij Albert Heijn. Wanneer de browser doorstuurt naar appie://login-exit, kopieer je de authorization code of de volledige redirect-URL en plak je die hieronder. Je AH-wachtwoord wordt nooit in Home Assistant opgeslagen.",
         "data": {
           "authorization_code": "Authorization code of redirect-URL"
         },
@@ -13,20 +14,19 @@
       },
       "reauth_confirm": {
         "title": "Albert Heijn opnieuw koppelen",
-        "description": "Open {login_url}, log in en plak de teruggegeven appie://-URL of autorisatiecode.",
+        "description": "De Albert Heijn-authenticatie is verlopen. Open {login_url}, log opnieuw in en plak daarna de nieuwe authorization code of volledige redirect-URL.",
         "data": {
-          "authorization_code": "Autorisatiecode of callback-URL"
+          "authorization_code": "Authorization code of redirect-URL"
         }
       }
     },
     "error": {
       "invalid_auth": "Albert Heijn accepteert deze authorization code niet. Vraag een nieuwe code op en probeer opnieuw.",
-      "cannot_connect": "Kan geen verbinding maken met de Albert Heijn-boodschappenlijst-API. Bekijk het Home Assistant-logboek voor de exacte API-fout."
+      "cannot_connect": "Kan geen verbinding maken met de Albert Heijn-API. Controleer de verbinding en probeer opnieuw.",
+      "wrong_account": "Je bent met een ander Albert Heijn-account ingelogd. Log in met het account dat oorspronkelijk gekoppeld was."
     },
     "abort": {
-      "already_configured": "Dit AH-account is al geconfigureerd",
-      "reauth_successful": "Opnieuw koppelen gelukt"
+      "already_configured": "Dit Albert Heijn-account is al gekoppeld."
     }
-  },
-  "title": "Albert Heijn Shopping"
+  }
 }

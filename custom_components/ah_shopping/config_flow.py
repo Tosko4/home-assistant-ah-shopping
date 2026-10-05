@@ -1,4 +1,5 @@
 """Config flow for Albert Heijn Shopping."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,6 +7,7 @@ import logging
 from typing import Any, Mapping
 
 import voluptuous as vol
+
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -23,6 +25,7 @@ from .const import (
 from .exceptions import AhAuthError, AhShoppingError, AhTransientError
 
 CONF_AUTHORIZATION_CODE = "authorization_code"
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -46,30 +49,35 @@ class AhShoppingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def _exchange(self, value: str) -> dict[str, Any]:
+        """Exchange the code and verify the authenticated GraphQL connection."""
         client = AhShoppingApiClient(async_get_clientsession(self.hass))
         tokens = await client.exchange_authorization_code(value)
-        # Validate only the proven shopping-list endpoint. An unrelated GraphQL
-        # schema rejection must never make a valid AH login look broken.
+        # Keep this setup validation identical to Albert Heijn Delivery.
+        # Shopping-list API calls are intentionally not part of login.
         await client.async_validate_connection()
         return tokens
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
                 tokens = await self._exchange(user_input[CONF_AUTHORIZATION_CODE])
-            except (AhAuthError, ValueError) as err:
-                _LOGGER.warning("Albert Heijn authorization failed during setup: %s", err)
+            except AhAuthError as err:
+                _LOGGER.warning(
+                    "Albert Heijn authorization failed during setup: %s", err
+                )
                 errors["base"] = "invalid_auth"
-            except AhTransientError as err:
-                _LOGGER.warning("Albert Heijn is temporarily unavailable during setup: %s", err)
+            except (AhTransientError, AhShoppingError):
                 errors["base"] = "cannot_connect"
-            except AhShoppingError as err:
-                _LOGGER.warning("Albert Heijn shopping-list validation failed during setup: %s", err)
-                errors["base"] = "cannot_connect"
+            except ValueError:
+                errors["base"] = "invalid_auth"
             else:
-                source = str(tokens.get(CONF_MEMBER_ID) or tokens.get(CONF_REFRESH_TOKEN) or "")
-                unique = hashlib.sha256(source.encode()).hexdigest()[:24]
+                refresh = str(tokens.get(CONF_REFRESH_TOKEN, ""))
+                member = str(tokens.get(CONF_MEMBER_ID, ""))
+                unique_source = member or refresh
+                unique = hashlib.sha256(unique_source.encode()).hexdigest()[:24]
                 await self.async_set_unique_id(unique)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title=NAME, data=_entry_data(tokens))
@@ -81,26 +89,44 @@ class AhShoppingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"login_url": AhShoppingApiClient.login_url()},
         )
 
-    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Start reauthentication."""
         return await self.async_step_reauth_confirm()
 
-    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
                 tokens = await self._exchange(user_input[CONF_AUTHORIZATION_CODE])
-            except (AhAuthError, ValueError) as err:
-                _LOGGER.warning("Albert Heijn authorization failed during reauthentication: %s", err)
+            except AhAuthError as err:
+                _LOGGER.warning(
+                    "Albert Heijn authorization failed during reauthentication: %s",
+                    err,
+                )
                 errors["base"] = "invalid_auth"
-            except AhTransientError as err:
-                _LOGGER.warning("Albert Heijn is temporarily unavailable during reauthentication: %s", err)
+            except (AhTransientError, AhShoppingError):
                 errors["base"] = "cannot_connect"
-            except AhShoppingError as err:
-                _LOGGER.warning("Albert Heijn shopping-list validation failed during reauthentication: %s", err)
-                errors["base"] = "cannot_connect"
+            except ValueError:
+                errors["base"] = "invalid_auth"
             else:
                 entry = self._get_reauth_entry()
-                return self.async_update_reload_and_abort(entry, data_updates=_entry_data(tokens))
+                member = str(tokens.get(CONF_MEMBER_ID, ""))
+                if member and entry.unique_id:
+                    new_unique = hashlib.sha256(member.encode()).hexdigest()[:24]
+                    if new_unique != entry.unique_id:
+                        errors["base"] = "wrong_account"
+                    else:
+                        return self.async_update_reload_and_abort(
+                            entry, data_updates=_entry_data(tokens)
+                        )
+                else:
+                    return self.async_update_reload_and_abort(
+                        entry, data_updates=_entry_data(tokens)
+                    )
 
         return self.async_show_form(
             step_id="reauth_confirm",

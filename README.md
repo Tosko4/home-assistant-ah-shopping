@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.2
+## MVP 0.1.3
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -24,7 +24,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 Add `https://github.com/digital-IMEI/home-assistant-ah-shopping` as a HACS custom repository, category **Integration**, install **Albert Heijn Shopping**, restart Home Assistant, then add the integration under **Settings → Devices & services**.
 
-The setup flow opens the AH login page. Sign in and paste the returned `appie://...code=...` URL (or just the code) into Home Assistant.
+The setup flow is intentionally identical to Albert Heijn Delivery: it opens the AH login page, exchanges the one-time `appie://...code=...` authorization code, and validates authentication with the same proven GraphQL query. The shopping list itself is read separately from `/mobile-services/shoppinglist/v2/items`.
 
 ## Dashboard card
 
