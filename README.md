@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.1
+## 0.2.2
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -43,26 +43,37 @@ entity: sensor.albert_heijn_shopping_list
 title: Boodschappen
 ```
 
-### Fixed-height list with scrolling
+### Card sections
 
-Set `height` in pixels. The header and search controls stay visible while the shopping list itself scrolls.
+The product search bar has been removed from the dashboard card. The card now has three independently configurable sections:
 
 ```yaml
 type: custom:ah-shopping-card
 entity: sensor.albert_heijn_shopping_list
 title: Boodschappen
+show_header: true
+show_scan: true
+show_products: true
 height: 500
+scan_label: Scan product
 ```
 
-### Scan button only
+- `show_header`: title, item count and total amount.
+- `show_scan`: full-width barcode scan button.
+- `show_products`: shopping-list product rows.
+- `height`: fixed card height when the product list is visible; the list scrolls internally.
 
-Use `mode: scan_only` for a compact card that only opens the barcode scanner.
+For a scanner-only card:
 
 ```yaml
 type: custom:ah-shopping-card
-mode: scan_only
+show_header: false
+show_scan: true
+show_products: false
 scan_label: Scan product
 ```
+
+Existing cards using `mode: scan_only` remain compatible.
 
 ### Test barcode
 
@@ -76,9 +87,11 @@ The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses t
 
 ## Entities
 
-- `sensor.ah_shopping_list` — total item quantity; rich `items` attribute for the card
-- `sensor.ah_shopping_estimated_total` — estimated EUR total
-- `todo.ah_shopping_list` — read-only native HA view of the AH list
+- `sensor.albert_heijn_shopping_list` — total shopping-list quantity; rich `items` attribute for the card
+- `sensor.albert_heijn_shopping_estimated_total` — estimated EUR total
+- `sensor.albert_heijn_shopping_bonus_savings` — calculated supported Bonus savings
+- `sensor.albert_heijn_next_order` — total quantity in the next scheduled AH order; attributes include order id, delivery date/time, total price, unique item count and all ordered product lines
+- `todo.albert_heijn_shopping_list` — read-only native HA view of the AH list
 
 ## Services
 
@@ -200,3 +213,13 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Prevents the same barcode from being selected repeatedly while it remains in view. To scan the same product again, move it out of frame briefly and present it again.
 - Shows the latest successfully scanned product in a panel to the right of the camera, including image, product name, price, Bonus information, current list quantity and +/- controls.
 - On narrow screens the scanned-product panel moves below the camera.
+
+
+### 0.2.2
+
+- Removes the product-search bar from the dashboard card.
+- Makes the scan button full width.
+- Adds independent card options `show_header`, `show_scan` and `show_products`.
+- Keeps legacy `mode: scan_only` cards working.
+- Adds `sensor.albert_heijn_next_order` for the earliest open scheduled AH fulfillment.
+- The next-order sensor exposes total quantity, unique product count, delivery slot, total order price, modifiable status and all product lines with quantity/price/Bonus/category details.
