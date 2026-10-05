@@ -20,7 +20,11 @@ CONF_EXPIRES_AT = "expires_at"
 CONF_MEMBER_ID = "member_id"
 
 TOKEN_REFRESH_MARGIN = timedelta(minutes=5)
-UPDATE_INTERVAL = timedelta(minutes=5)
+CONF_UPDATE_INTERVAL_MINUTES = "update_interval_minutes"
+DEFAULT_UPDATE_INTERVAL_MINUTES = 5
+MIN_UPDATE_INTERVAL_MINUTES = 1
+MAX_UPDATE_INTERVAL_MINUTES = 60
+UPDATE_INTERVAL = timedelta(minutes=DEFAULT_UPDATE_INTERVAL_MINUTES)
 
 # This is deliberately the exact same proven authentication validation query
 # used by Albert Heijn Delivery. Shopping-list availability is validated later
