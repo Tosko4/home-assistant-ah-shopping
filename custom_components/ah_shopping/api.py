@@ -268,9 +268,12 @@ class AhShoppingApiClient:
     async def async_search_products(self, query: str, limit: int = 8) -> list[Product]:
         params = urlencode({"query": query, "page": 0, "size": max(1, min(limit, 20)), "sortOn": "RELEVANCE"})
         raw = await self._raw_request("GET", f"/mobile-services/product/search/v2?{params}")
-        if not isinstance(raw, dict):
+        if isinstance(raw, list):
+            products = raw
+        elif isinstance(raw, dict):
+            products = raw.get("products") or raw.get("data") or []
+        else:
             return []
-        products = raw.get("products") or raw.get("data") or []
         if isinstance(products, dict):
             products = products.get("products") or products.get("items") or []
         if not isinstance(products, list):
