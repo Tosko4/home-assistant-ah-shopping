@@ -1,7 +1,7 @@
 """Data models for Albert Heijn Shopping."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import re
 from typing import Any
 
@@ -188,6 +188,18 @@ class ShoppingListData:
 
     def item_for_product(self, product_id: int) -> ShoppingItem | None:
         return next((item for item in self.items if item.product_id == product_id), None)
+
+    def with_product_quantity(self, product_id: int, quantity: int) -> "ShoppingListData":
+        """Return a copy with one product quantity changed immediately."""
+        quantity = max(0, int(quantity))
+        updated: list[ShoppingItem] = []
+        for item in self.items:
+            if item.product_id != product_id:
+                updated.append(item)
+                continue
+            if quantity > 0:
+                updated.append(replace(item, quantity=quantity))
+        return replace(self, items=tuple(updated))
 
     def as_dict(self) -> dict[str, Any]:
         return {
