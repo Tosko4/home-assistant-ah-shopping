@@ -13,6 +13,16 @@ def _int(value: Any, default: int = 0) -> int:
 
 
 def _float(value: Any, default: float = 0.0) -> float:
+    """Normalise AH money values.
+
+    AH currently returns prices both as plain numbers and as nested money
+    objects such as {"amount": 1.10} (and, in some APIs,
+    {"amount": {"amount": 1.10}}).
+    """
+    while isinstance(value, dict):
+        if "amount" not in value:
+            return default
+        value = value.get("amount")
     try:
         return float(value) if value is not None else default
     except (TypeError, ValueError):
