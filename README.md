@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.10
+## 0.2.11
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -321,3 +321,13 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Requests a lower-latency 1280×720 / 30 fps camera stream instead of processing 1920×1080 frames.
 - Applies continuous autofocus, exposure and white-balance constraints when the Android camera/WebView exposes those capabilities.
 - Reduces the scan loop delay from 140 ms to 90 ms.
+
+
+### 0.2.11
+
+- Removes the experimental white front-camera fill-light panel.
+- Keeps the visible product order stable while quantities are changed and Home Assistant/AH state refreshes arrive.
+- Restores reliable internal product-list scrolling, including touch scrolling in Android/Fully Kiosk.
+- Simplifies the combined-view header: the source label is no longer shown next to the delivery slot.
+- Shows the delivery date/time on the left below the title.
+- Shows Bonus savings and the article count below the total amount on the right.
