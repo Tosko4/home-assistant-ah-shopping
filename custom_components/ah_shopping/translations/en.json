@@ -1,0 +1,18 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Albert Heijn",
+        "description": "Open {login_url}, sign in, and paste the returned appie:// URL or authorization code.",
+        "data": {"authorization_code": "Authorization code or callback URL"}
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Albert Heijn",
+        "description": "Open {login_url}, sign in, and paste the returned appie:// URL or authorization code.",
+        "data": {"authorization_code": "Authorization code or callback URL"}
+      }
+    },
+    "error": {"invalid_auth": "Authentication failed", "cannot_connect": "Could not connect to Albert Heijn"},
+    "abort": {"already_configured": "This AH account is already configured", "reauth_successful": "Reauthentication successful"}
+  }
+}

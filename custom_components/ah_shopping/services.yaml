@@ -1,0 +1,51 @@
+search_products:
+  name: Search products
+  description: Search the AH product catalogue.
+  fields:
+    query:
+      required: true
+      selector: {text: {}}
+    limit:
+      default: 8
+      selector: {number: {min: 1, max: 20, mode: box}}
+lookup_barcode:
+  name: Look up barcode
+  fields:
+    barcode:
+      required: true
+      selector: {text: {}}
+add_product:
+  name: Add product
+  fields:
+    product_id:
+      required: true
+      selector: {number: {mode: box}}
+    quantity:
+      default: 1
+      selector: {number: {min: 1, max: 99, mode: box}}
+add_barcode:
+  name: Add scanned barcode
+  fields:
+    barcode:
+      required: true
+      selector: {text: {}}
+    quantity:
+      default: 1
+      selector: {number: {min: 1, max: 99, mode: box}}
+set_quantity:
+  name: Set quantity
+  fields:
+    product_id:
+      required: true
+      selector: {number: {mode: box}}
+    quantity:
+      required: true
+      selector: {number: {min: 0, max: 99, mode: box}}
+remove_product:
+  name: Remove product
+  fields:
+    product_id:
+      required: true
+      selector: {number: {mode: box}}
+refresh:
+  name: Refresh list
