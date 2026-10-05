@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.3
+## MVP 0.1.5
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -42,6 +42,10 @@ type: custom:ah-shopping-card
 entity: sensor.ah_shopping_list
 title: Boodschappen
 ```
+
+### Test barcode
+
+For a quick camera test, use EAN-13 `8710400169468` (AH Biologisch Halfvolle melk 1 l at the time of writing).
 
 ### Camera requirements
 

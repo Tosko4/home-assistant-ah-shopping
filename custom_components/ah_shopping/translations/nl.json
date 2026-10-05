@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Albert Heijn koppelen",
-        "description": "Open deze Albert Heijn-login-URL in je browser: {login_url}\n\nLog in bij Albert Heijn. Wanneer de browser doorstuurt naar appie://login-exit, kopieer je de authorization code of de volledige redirect-URL en plak je die hieronder. Je AH-wachtwoord wordt nooit in Home Assistant opgeslagen.",
+        "description": "[Open Albert Heijn login]({login_url})\n\nLog in bij Albert Heijn. Wanneer de browser doorstuurt naar appie://login-exit, kopieer je de authorization code of de volledige redirect-URL en plak je die hieronder. Je AH-wachtwoord wordt nooit in Home Assistant opgeslagen.",
         "data": {
           "authorization_code": "Authorization code of redirect-URL"
         },
@@ -14,7 +14,7 @@
       },
       "reauth_confirm": {
         "title": "Albert Heijn opnieuw koppelen",
-        "description": "De Albert Heijn-authenticatie is verlopen. Open {login_url}, log opnieuw in en plak daarna de nieuwe authorization code of volledige redirect-URL.",
+        "description": "De Albert Heijn-authenticatie is verlopen. [Open Albert Heijn login]({login_url}), log opnieuw in en plak daarna de nieuwe authorization code of volledige redirect-URL.",
         "data": {
           "authorization_code": "Authorization code of redirect-URL"
         }
