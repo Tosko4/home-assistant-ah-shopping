@@ -183,3 +183,19 @@ def test_next_order_totals():
     assert order.unique_items == 2
     assert order.total_quantity == 5
     assert order.as_dict()["items"][0]["line_total"] == 3.00
+
+
+def test_active_cart_totals():
+    from custom_components.ah_shopping.models import ActiveCartData, NextOrderItem
+
+    cart = ActiveCartData(
+        order_id=1,
+        total_price=8.50,
+        items=(
+            NextOrderItem(10, "A", 2, price_now=1.50),
+            NextOrderItem(11, "B", 1, price_now=2.00),
+        ),
+    )
+    assert cart.unique_items == 2
+    assert cart.total_quantity == 3
+    assert cart.as_dict()["total_price"] == 8.50
