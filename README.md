@@ -6,7 +6,7 @@ Home Assistant custom integration for managing the **Albert Heijn shopping list*
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## MVP 0.1.12
+## MVP 0.1.13
 
 - Authenticated connection to your AH account
 - Reads the first/default AH shopping list
@@ -159,3 +159,13 @@ The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses t
 - ZXing reuses the already-open camera feed; it does not request a second camera session.
 - Scanner status shows whether native, ZXing or local fallback is active and counts processed frames.
 - Prevents duplicate custom-element registration if Home Assistant loads the card module twice.
+
+
+### 0.1.13
+
+- Plays a short locally generated checkout-scanner beep after a barcode has been resolved and successfully added to the AH list.
+- Keeps the scanner open after a successful scan and shows product image, name, current price, unit size and Bonus label.
+- Adds +/- quantity controls directly to the scan result.
+- Adds "Scan volgende" and "Klaar" actions instead of auto-closing the scanner after one second.
+- Newly scanned products are inserted into the Home Assistant coordinator immediately, before the background AH refresh completes.
+- Keeps an active scanner modal open while Home Assistant entity updates arrive, preventing scan-result UI from disappearing mid-flow.
