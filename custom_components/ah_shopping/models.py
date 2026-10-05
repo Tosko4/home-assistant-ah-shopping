@@ -201,6 +201,35 @@ class ShoppingListData:
                 updated.append(replace(item, quantity=quantity))
         return replace(self, items=tuple(updated))
 
+    def with_product(self, product: Product, quantity: int) -> "ShoppingListData":
+        """Insert or update a complete product immediately after a scan."""
+        quantity = max(0, int(quantity))
+        existing = self.item_for_product(product.id)
+        if existing is not None:
+            updated = tuple(
+                replace(
+                    item,
+                    quantity=quantity,
+                    description=product.title or item.description,
+                    product=product,
+                )
+                if item.product_id == product.id and quantity > 0
+                else item
+                for item in self.items
+                if item.product_id != product.id or quantity > 0
+            )
+            return replace(self, items=updated)
+        if quantity <= 0:
+            return self
+        item = ShoppingItem(
+            item_id=f"product-{product.id}",
+            product_id=product.id,
+            quantity=quantity,
+            description=product.title,
+            product=product,
+        )
+        return replace(self, items=(*self.items, item))
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "list_id": self.list_id,
