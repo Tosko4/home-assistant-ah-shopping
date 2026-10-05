@@ -12,6 +12,18 @@ jobs:
       - run: python -m compileall -q custom_components/ah_shopping
       - run: pip install pytest aiohttp
       - run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate frontend JavaScript syntax
+        run: |
+          cp custom_components/ah_shopping/frontend/ah-shopping-card.js /tmp/ah-shopping-card.mjs
+          cp custom_components/ah_shopping/frontend/ean-decoder.js /tmp/ean-decoder.mjs
+          node --check /tmp/ah-shopping-card.mjs
+          node --check /tmp/ean-decoder.mjs
+
   hacs:
     runs-on: ubuntu-latest
     steps:
