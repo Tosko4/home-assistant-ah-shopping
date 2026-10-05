@@ -260,6 +260,14 @@ class AhShoppingApiClient:
         if not isinstance(detail, dict):
             raise AhTransientError("Unexpected AH order details response")
 
+        def money(value: Any) -> float:
+            while isinstance(value, dict):
+                value = value.get("amount")
+            try:
+                return float(value) if value is not None else 0.0
+            except (TypeError, ValueError):
+                return 0.0
+
         items: list[NextOrderItem] = []
         groups = detail.get("groupedProductsInTaxonomy") or []
         if isinstance(groups, list):
@@ -276,14 +284,6 @@ class AhShoppingApiClient:
                     product = raw.get("product") or {}
                     if not isinstance(product, dict):
                         continue
-
-                    def money(value: Any) -> float:
-                        while isinstance(value, dict):
-                            value = value.get("amount")
-                        try:
-                            return float(value) if value is not None else 0.0
-                        except (TypeError, ValueError):
-                            return 0.0
 
                     before = money(product.get("priceBeforeBonus"))
                     current = money(product.get("currentPrice"))
