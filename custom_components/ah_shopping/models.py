@@ -290,6 +290,7 @@ class NextOrderItem:
     is_bonus: bool = False
     bonus_mechanism: str = ""
     taxonomy: str = ""
+    image_url: str = ""
 
     @property
     def line_total(self) -> float:
@@ -307,6 +308,7 @@ class NextOrderItem:
             "is_bonus": self.is_bonus,
             "bonus_mechanism": self.bonus_mechanism,
             "taxonomy": self.taxonomy,
+            "image_url": self.image_url,
             "line_total": self.line_total,
         }
 
@@ -347,6 +349,37 @@ class NextOrderData:
             "delivery_start_time": self.delivery_start_time,
             "delivery_end_time": self.delivery_end_time,
             "total_price": round(self.total_price, 2),
+            "total_quantity": self.total_quantity,
+            "unique_items": self.unique_items,
+            "items": [item.as_dict() for item in self.items],
+        }
+
+
+
+@dataclass(slots=True, frozen=True)
+class ActiveCartData:
+    order_id: int = 0
+    state: str = ""
+    shopping_type: str = ""
+    total_price: float = 0.0
+    total_discount: float = 0.0
+    items: tuple[NextOrderItem, ...] = field(default_factory=tuple)
+
+    @property
+    def total_quantity(self) -> int:
+        return sum(max(item.quantity, 0) for item in self.items)
+
+    @property
+    def unique_items(self) -> int:
+        return len(self.items)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "order_id": self.order_id,
+            "state": self.state,
+            "shopping_type": self.shopping_type,
+            "total_price": round(self.total_price, 2),
+            "total_discount": round(self.total_discount, 2),
             "total_quantity": self.total_quantity,
             "unique_items": self.unique_items,
             "items": [item.as_dict() for item in self.items],
