@@ -47,18 +47,29 @@ class Product:
             if valid:
                 best = max(valid, key=lambda i: _int(i.get("width")))
                 best_image = str(best.get("url", ""))
-        price_now = _float(data.get("currentPrice"))
+        price_now = _float(data.get("currentPrice") or data.get("price"))
         price_was = _float(data.get("priceBeforeBonus"))
         if price_now <= 0:
             price_now = price_was
+        if not best_image:
+            best_image = str(data.get("imageUrl") or "")
         return cls(
             id=_int(data.get("webshopId") or data.get("id") or payload.get("productId")),
-            title=str(data.get("title", "")),
-            brand=str(data.get("brand", "")),
-            unit_size=str(data.get("salesUnitSize", "")),
+            title=str(data.get("title") or data.get("description") or ""),
+            brand=str(data.get("brand") or ""),
+            unit_size=str(
+                data.get("salesUnitSize")
+                or data.get("unitSize")
+                or data.get("unitPriceDescription")
+                or ""
+            ),
             price_now=price_now,
             price_was=price_was,
-            is_bonus=bool(data.get("isBonus")),
+            is_bonus=bool(
+                data.get("isBonus")
+                or data.get("isBonusPrice")
+                or data.get("bonusMechanism")
+            ),
             bonus_mechanism=str(data.get("bonusMechanism") or ""),
             image_url=best_image,
         )
