@@ -73,7 +73,10 @@ query OrderFulfillments {
       statusDescription
       shoppingType
       transactionCompleted
+      reopenable
       modifiable
+      isAfterCutOff
+      closingDateTime
       totalPrice {
         totalPrice {
           amount
