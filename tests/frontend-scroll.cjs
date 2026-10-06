@@ -34,6 +34,22 @@ const path=require('node:path');
  },source);
  for(const [key,value] of Object.entries(result))assert.equal(value,true,`${source}: ${key}`);
  }
+ const fallbackPreservesResult=await page.evaluate(async()=>{
+  const card=document.createElement('ah-shopping-card');
+  let reads=0,detected='';
+  const pixels=new Uint8ClampedArray(320*120*4);
+  const ctx={drawImage(){},getImageData(){return {width:320,height:120,data:pixels};}};
+  card._scanner={querySelector:()=>({readyState:2,videoWidth:640})};
+  card._stream={};card._config={scan_decoder:'auto'};card._decoderMode='zxing';
+  card._decoderMisses=3;card._scanCanvas={getContext:()=>ctx};
+  card._scanBandCanvas={getContext:()=>ctx};
+  card._scanSourceRect=()=>({sx:0,sy:0,sw:320,sh:120});
+  card._shouldScannerRun=()=>true;card._scheduleScan=()=>{};
+  card._zxingReader={decodeFromCanvas(){if(++reads===1)throw new Error('No code');return {getText:()=> '4006381333931'};}};
+  card._barcodeDetected=code=>detected=code;
+  await card._scanFrame();return detected==='4006381333931';
+ });
+ assert.equal(fallbackPreservesResult,true,'Fallback must preserve a successful central-band decode');
  const lifecycle=await page.evaluate(async()=>{
   document.querySelector('ah-shopping-card')?.remove();
   const errors=[];window.addEventListener('error',e=>errors.push(e.message));

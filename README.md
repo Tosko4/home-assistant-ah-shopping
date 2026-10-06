@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.18
+## 0.2.19
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -444,3 +444,8 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Re-arms button-auto scanner mode on return to its dashboard route and when the card reconnects. Closing a scanner session stays effective for the current visit; entity updates and scrolling do not reopen it.
 - Removes approximation symbols from the total and Bonus text; the underlying product-total calculation is unchanged.
 - Adds browser coverage for automatic scanner lifecycle and rendering before entity data arrives.
+
+### 0.2.19
+
+- Preserves a successful ZXing central-band result instead of overwriting it with a failed Local EAN fallback on every fourth missed primary frame.
+- Adds a regression test for that decoder handoff. Includes the dashboard revisit and header changes from 0.2.18.

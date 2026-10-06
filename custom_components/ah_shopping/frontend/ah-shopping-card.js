@@ -969,7 +969,7 @@ class AhShoppingCard extends HTMLElement {
         // decoder selections stay on the selected engine so users can compare
         // reliability/performance on their own browser/camera.
         const autoDecoder=(this._config.scan_decoder||'auto')==='auto';
-        if(autoDecoder&&this._decoderMode==='zxing'&&this._decoderMisses%4===0){
+        if(autoDecoder&&!code&&this._decoderMode==='zxing'&&this._decoderMisses%4===0){
           try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
         }
         const nativeEvery=this._isAndroid?12:4;
