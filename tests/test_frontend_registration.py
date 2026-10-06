@@ -1,3 +1,4 @@
+from custom_components.ah_shopping.const import FRONTEND_MODULE_URL
 import asyncio
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -72,7 +73,7 @@ def test_register_updates_only_card_resource(monkeypatch):
     asyncio.run(register(hass))
     assert len(resources.items) == 1
     assert resources.items[0]['id'] == 'card'
-    assert resources.items[0]['url'].endswith('v=0.2.20')
+    assert resources.items[0]['url'] == FRONTEND_MODULE_URL
 
 
 def test_yaml_keeps_automatic_fallback_without_writing_resources(monkeypatch):

@@ -33,6 +33,12 @@ const server=http.createServer((req,res)=>{
    const wide=document.createElement('canvas');wide.width=1280;wide.height=720;
    const wctx=wide.getContext('2d');wctx.fillStyle='white';wctx.fillRect(0,0,1280,720);wctx.drawImage(canvas,700,450);
    const offCenter=await decode(wide);
+   const blank=document.createElement('canvas');blank.width=400;blank.height=200;
+   const bctx=blank.getContext('2d');bctx.fillStyle='white';bctx.fillRect(0,0,400,200);
+   const noFalsePositive=await decode(blank)==='';
+   let additions=0;card._pulseScanner=()=>{};card._setScanStatus=()=>{};card._processScanQueue=()=>{additions++;};
+   card._barcodeDetected(ean);card._barcodeDetected(ean);
+   const duplicateProtected=additions===1;
    let callback,scheduled=0;
    card._scanner={querySelector:()=>({requestVideoFrameCallback:cb=>{callback=cb;scheduled++;return 1;},cancelVideoFrameCallback(){}})};
    card._stream={};card._scanFrame=()=>{};
@@ -40,9 +46,10 @@ const server=http.createServer((req,res)=>{
    card._scanCooldownUntil=Date.now()+350;card._scheduleScan();
    const cooldown=card._scanLoop!=null&&scheduled===1;
    card._cancelScheduledScan();card._stopWasmWorker();
-   return {normal,rotatedCode,offCenter,immediate,cooldown};
+   return {normal,rotatedCode,offCenter,immediate,cooldown,noFalsePositive,duplicateProtected};
   });
   for(const key of ['normal','rotatedCode','offCenter'])assert.equal(results[key],'4006381333931',key);
+  assert.equal(results.noFalsePositive,true);assert.equal(results.duplicateProtected,true);
   assert.equal(results.immediate,true);assert.equal(results.cooldown,true);
   console.log('PASS: locally bundled WASM, EAN decoding, rotation, off-center full-frame search, frame scheduling and success-only cooldown');
  }finally{await browser.close();await new Promise(r=>server.close(r));}

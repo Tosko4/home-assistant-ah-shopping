@@ -739,8 +739,8 @@ class AhShoppingCard extends HTMLElement {
     this._scanStatusTimer=null;
     const status=this._scanner?.querySelector('#scanstatus');
     if(!status)return;
-    status.textContent=error?text:'';
-    status.hidden=!error;
+    status.textContent=text;
+    status.hidden=!text;
     status.classList.toggle('error',Boolean(error));
     if(error&&timeout>0){
       this._scanStatusTimer=setTimeout(()=>{
@@ -1005,6 +1005,7 @@ class AhShoppingCard extends HTMLElement {
         if(this._barcodeDetector){
           try{const hits=await this._barcodeDetector.detect(c);code=hits?.[0]?.rawValue||'';}catch(e){}
         }
+        if(code&&!checksumOk(String(code).replace(/\D/g,'')))code='';
         if(!code)code=await this._decodeWasm(ctx.getImageData(0,0,c.width,c.height),this._decoderMisses>=2);
         code=String(code||'').replace(/\D/g,'');
       }else if(this._decoderMode==='zxing'&&this._zxingReader?.decodeFromCanvas){
@@ -1102,6 +1103,8 @@ class AhShoppingCard extends HTMLElement {
     }
     this._heldBarcode=code;
     this._heldBarcodeLastSeen=now;
+    this._pulseScanner();
+    this._setScanStatus('Barcode gelezen · product ophalen…');
     this._scanQueue.push(code);
     this._processScanQueue();
   }
