@@ -2,7 +2,7 @@ import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
   constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._scanCountdownTimer=null; this._scanDeadline=0; this._facing='user'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._syncScannerVisibility());}
-  static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list'};}
+  static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
     {name:'title',selector:{text:{}}},
@@ -73,7 +73,8 @@ class AhShoppingCard extends HTMLElement {
     return 7;
   }
   getGridOptions(){
-    const compact=this._config.show_products===false;
+    const permanent=this._config.scanner_mode==='permanent';
+    const compact=this._config.show_products===false&&!permanent;
     return {
       columns:12,
       rows:compact?2:6,
