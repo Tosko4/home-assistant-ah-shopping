@@ -517,6 +517,7 @@ class AhShoppingCard extends HTMLElement {
       ${permanent?'':`<button id="scanClose" class="scanClose" aria-label="Sluit scanner">×</button>`}
       <div class="scanHud">
         <span id="scanstatus" class="scanPill scanStatus" hidden></span>
+        <span id="scanhealth" class="scanPill">Scanner 0.2.22 · starten…</span>
         ${permanent?'':`<span id="scanTimer" class="scanPill scanTimer">Auto sluiten · 1:00</span>`}
       </div>
     </div>`;
@@ -690,6 +691,7 @@ class AhShoppingCard extends HTMLElement {
       await this._initScannerEngine();
       if(generation!==this._scanGeneration){this._stopWasmWorker();return;}
       this._setScanStatus('');
+      this._updateScanHealth();
       this._scheduleScan();
     }catch(e){
       this._setScanStatus(`Camera: ${e.message||e}`,true);
@@ -804,7 +806,6 @@ class AhShoppingCard extends HTMLElement {
     if(selected==='auto'||selected==='wasm'){
       try{
         await this._initWasmWorker();
-        if(selected==='auto')await tryNative();
         this._decoderMode='wasm';
         return;
       }catch(error){
@@ -869,9 +870,9 @@ class AhShoppingCard extends HTMLElement {
     const remaining=this._scanCooldownUntil-Date.now();
     if(remaining>0){
       this._scanLoop=setTimeout(()=>this._scheduleScan(),remaining);
-    }else if(video?.requestVideoFrameCallback){
-      this._scanVideoFrame=video.requestVideoFrameCallback(()=>{this._scanVideoFrame=null;this._scanFrame();});
     }else{
+      // Keep decoding even when a browser exposes frame callbacks but never
+      // delivers them. RAF starts the next attempt without an artificial delay.
       this._scanAnimationFrame=requestAnimationFrame(()=>{this._scanAnimationFrame=null;this._scanFrame();});
     }
   }
@@ -891,7 +892,7 @@ class AhShoppingCard extends HTMLElement {
 
   async _initWasmWorker(){
     this._stopWasmWorker();
-    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.21');
+    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.22');
     this._decodeWorker=worker;
     await new Promise((resolve,reject)=>{
       const timeout=setTimeout(()=>reject(new Error('Barcode decoder could not be loaded')),10000);
@@ -917,9 +918,40 @@ class AhShoppingCard extends HTMLElement {
     return new Promise((resolve,reject)=>{
       if(!this._decodeWorker){reject(new Error('Barcode worker unavailable'));return;}
       const id=this._scanCount;
-      this._workerPending={id,resolve,reject};
-      this._decodeWorker.postMessage({id,width:image.width,height:image.height,pixels:image.data.buffer,harder},[image.data.buffer]);
+      const timeout=setTimeout(()=>{
+        if(this._workerPending?.id===id)this._workerPending=null;
+        reject(new Error('Barcode decoder antwoordt niet'));
+      },2000);
+      const pending={id,
+        resolve:code=>{clearTimeout(timeout);resolve(code);},
+        reject:error=>{clearTimeout(timeout);reject(error);}
+      };
+      this._workerPending=pending;
+      try{
+        this._decodeWorker.postMessage({id,width:image.width,height:image.height,pixels:image.data.buffer,harder},[image.data.buffer]);
+      }catch(error){this._workerPending=null;pending.reject(error);}
     });
+  }
+
+  _detectNative(canvas){
+    const detector=this._barcodeDetector;
+    return new Promise((resolve,reject)=>{
+      const timeout=setTimeout(()=>{
+        if(this._barcodeDetector===detector)this._barcodeDetector=null;
+        reject(new Error('Browserdecoder antwoordt niet'));
+      },1000);
+      Promise.resolve().then(()=>detector.detect(canvas)).then(
+        value=>{clearTimeout(timeout);resolve(value);},
+        error=>{clearTimeout(timeout);reject(error);}
+      );
+    });
+  }
+
+  _updateScanHealth(){
+    const health=this._scanner?.querySelector('#scanhealth');
+    if(!health)return;
+    const engine={wasm:'ZXing-C++',zxing:'ZXing legacy',native:'Browser',local:'Local EAN'}[this._decoderMode]||this._decoderMode;
+    health.textContent=`Scanner 0.2.22 · ${engine} · ${this._scanCount} scans`;
   }
 
   _scanSourceRect(video){
@@ -1001,12 +1033,9 @@ class AhShoppingCard extends HTMLElement {
       ctx.drawImage(video,sx,sy,sw,sh,0,0,c.width,c.height);
 
       if(this._decoderMode==='wasm'){
-        // Native detection can return quickly; C++ handles difficult frames.
-        if(this._barcodeDetector){
-          try{const hits=await this._barcodeDetector.detect(c);code=hits?.[0]?.rawValue||'';}catch(e){}
-        }
-        if(code&&!checksumOk(String(code).replace(/\D/g,'')))code='';
-        if(!code)code=await this._decodeWasm(ctx.getImageData(0,0,c.width,c.height),this._decoderMisses>=2);
+        // C++ runs independently of browser BarcodeDetector promises, which can
+        // hang indefinitely on some camera/browser combinations.
+        code=await this._decodeWasm(ctx.getImageData(0,0,c.width,c.height),this._decoderMisses>=2);
         code=String(code||'').replace(/\D/g,'');
       }else if(this._decoderMode==='zxing'&&this._zxingReader?.decodeFromCanvas){
         try{
@@ -1022,10 +1051,10 @@ class AhShoppingCard extends HTMLElement {
         }
       }else if(this._decoderMode==='native'&&this._barcodeDetector){
         try{
-          const found=await this._barcodeDetector.detect(c);
+          const found=await this._detectNative(c);
           const hit=(found||[]).find(x=>x?.rawValue);
           if(hit)code=String(hit.rawValue).replace(/\D/g,'');
-        }catch(e){}
+        }catch(e){throw e;}
       }else if(this._decoderMode==='local'){
         try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
       }
@@ -1062,7 +1091,7 @@ class AhShoppingCard extends HTMLElement {
         const nativeEvery=this._isAndroid?12:4;
         if(autoDecoder&&!code&&this._decoderMode==='zxing'&&this._barcodeDetector&&this._decoderMisses>=4&&this._decoderMisses%nativeEvery===0){
           try{
-            const found=await this._barcodeDetector.detect(c);
+            const found=await this._detectNative(c);
             const hit=(found||[]).find(x=>x?.rawValue);
             if(hit)code=String(hit.rawValue).replace(/\D/g,'');
           }catch(e){}
@@ -1073,19 +1102,32 @@ class AhShoppingCard extends HTMLElement {
         if(code)this._decoderMisses=0;
       }
     }catch(e){
-      console.debug('AH Shopping scan frame error',e);
+      if(generation!==this._scanGeneration)return;
+      console.warn('AH Shopping scan frame error',e);
+      this._decoderMisses++;
+      if(this._decoderMode==='wasm'||this._decoderMode==='native'){
+        this._stopWasmWorker();
+        this._barcodeDetector=null;
+        this._decoderMode='local';
+        this._setScanStatus(`Decoder-fout: ${e.message||e} · Local EAN actief`,true);
+        try{const c=this._scanCanvas;code=decodeEANFromImageData(c.getContext('2d').getImageData(0,0,c.width,c.height));}catch(fallbackError){}
+      }else{
+        this._setScanStatus(`Scanner-fout: ${e.message||e}`,true);
+      }
     }
 
     if(generation!==this._scanGeneration)return;
-    if(code&&(/^\d{8}$/.test(code)||/^\d{12,14}$/.test(code))&&
-      checksumOk(code)){
-      this._barcodeDetected(code);
-    }else{
-      this._noteBarcodeAbsent();
+    try{
+      if(code&&(/^\d{8}$/.test(code)||/^\d{12,14}$/.test(code))&&checksumOk(code)){
+        this._barcodeDetected(code);
+      }else{
+        this._noteBarcodeAbsent();
+      }
+    }finally{
+      this._scanBusy=false;
+      this._updateScanHealth();
+      this._scheduleScan();
     }
-
-    this._scanBusy=false;
-    this._scheduleScan();
   }
 
   _noteBarcodeAbsent(){

@@ -17,7 +17,9 @@ const server=http.createServer((req,res)=>{
   await page.addScriptTag({url:'/ah_shopping/ah-shopping-card.js'});
   const results=await page.evaluate(async()=>{
    const card=document.createElement('ah-shopping-card');
-   await card._initWasmWorker();
+   let nativeCalls=0;window.BarcodeDetector=class {static getSupportedFormats(){nativeCalls++;return new Promise(()=>{});}};
+   await card._initScannerEngine();
+   const nativeIndependent=nativeCalls===0&&card._decoderMode==='wasm';
    const ean='4006381333931';
    let bits='101';const parity=EAN_PARITY[Number(ean[0])];
    for(let i=0;i<6;i++)bits+=(parity[i]==='L'?EAN_L:EAN_G)[Number(ean[i+1])];
@@ -36,19 +38,43 @@ const server=http.createServer((req,res)=>{
    const blank=document.createElement('canvas');blank.width=400;blank.height=200;
    const bctx=blank.getContext('2d');bctx.fillStyle='white';bctx.fillRect(0,0,400,200);
    const noFalsePositive=await decode(blank)==='';
+   // Exercise the actual crop/full-frame path instead of only the decoder API.
+   Object.defineProperties(canvas,{readyState:{value:4},videoWidth:{value:500},videoHeight:{value:180}});
+   card._scanner={querySelector:s=>s==='video'?canvas:null};card._stream={};
+   card._shouldScannerRun=()=>true;card._scanCanvas=document.createElement('canvas');
+   let scanned='';const originalDetected=card._barcodeDetected;const originalSchedule=card._scheduleScan;
+   card._barcodeDetected=code=>{scanned=code;};card._scheduleScan=()=>{};
+   for(let i=0;i<4;i++)await card._scanFrame();
+   const fullPipeline=scanned===ean&&!card._scanBusy;
+   const worker=card._decodeWorker;card._decodeWorker={postMessage(){},terminate(){}};
+   let timeoutRecovered=false;
+   try{await decode(canvas);}catch(error){timeoutRecovered=/antwoordt niet/.test(error.message)&&card._workerPending===null;}
+   card._decodeWorker=worker;
+   card._barcodeDetector={detect:()=>new Promise(()=>{})};
+   let nativeTimeout=false;
+   try{await card._detectNative(canvas);}catch(error){nativeTimeout=/antwoordt niet/.test(error.message)&&card._barcodeDetector===null;}
+   const originalDecode=card._decodeWasm;card._decodeWasm=async()=>{throw new Error('test worker failure');};
+   let visibleError='';card._setScanStatus=text=>{visibleError=text;};
+   await card._scanFrame();
+   const failureRecovered=card._decoderMode==='local'&&!card._scanBusy&&visibleError.includes('test worker failure');
+   card._decodeWasm=originalDecode;card._barcodeDetected=originalDetected;card._scheduleScan=originalSchedule;
    let additions=0;card._pulseScanner=()=>{};card._setScanStatus=()=>{};card._processScanQueue=()=>{additions++;};
    card._barcodeDetected(ean);card._barcodeDetected(ean);
    const duplicateProtected=additions===1;
-   let callback,scheduled=0;
-   card._scanner={querySelector:()=>({requestVideoFrameCallback:cb=>{callback=cb;scheduled++;return 1;},cancelVideoFrameCallback(){}})};
+   let callback,scheduled=0,videoCallbacks=0;
+   const originalRAF=window.requestAnimationFrame,originalCancel=window.cancelAnimationFrame;
+   window.requestAnimationFrame=cb=>{callback=cb;scheduled++;return 1;};window.cancelAnimationFrame=()=>{};
+   card._scanner={querySelector:()=>({requestVideoFrameCallback:()=>{videoCallbacks++;},cancelVideoFrameCallback(){}})};
    card._stream={};card._scanFrame=()=>{};
-   card._scheduleScan();const immediate=scheduled===1&&typeof callback==='function'&&card._scanLoop===null;
+   card._scheduleScan();const immediate=scheduled===1&&typeof callback==='function'&&card._scanLoop===null&&videoCallbacks===0;
    card._scanCooldownUntil=Date.now()+350;card._scheduleScan();
    const cooldown=card._scanLoop!=null&&scheduled===1;
+   card._cancelScheduledScan();window.requestAnimationFrame=originalRAF;window.cancelAnimationFrame=originalCancel;
    card._cancelScheduledScan();card._stopWasmWorker();
-   return {normal,rotatedCode,offCenter,immediate,cooldown,noFalsePositive,duplicateProtected};
+   return {normal,rotatedCode,offCenter,immediate,cooldown,noFalsePositive,duplicateProtected,nativeIndependent,fullPipeline,timeoutRecovered,nativeTimeout,failureRecovered};
   });
   for(const key of ['normal','rotatedCode','offCenter'])assert.equal(results[key],'4006381333931',key);
+  for(const key of ['nativeIndependent','fullPipeline','timeoutRecovered','nativeTimeout','failureRecovered'])assert.equal(results[key],true,key);
   assert.equal(results.noFalsePositive,true);assert.equal(results.duplicateProtected,true);
   assert.equal(results.immediate,true);assert.equal(results.cooldown,true);
   console.log('PASS: locally bundled WASM, EAN decoding, rotation, off-center full-frame search, frame scheduling and success-only cooldown');
