@@ -43,7 +43,7 @@ function decodeEANFromImageData(imageData){
 
 class AhShoppingCard extends HTMLElement {
   constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._scanBandCanvas=null; this._scanStatusTimer=null; this._isAndroid=/Android/i.test(navigator.userAgent||''); window.__ahShoppingScanOrder=window.__ahShoppingScanOrder||{seq:0,products:new Map()}; this._scanOrderState=window.__ahShoppingScanOrder; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
-  static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2};}
+  static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2,scan_decoder:'auto'};}
   static getConfigForm(){return {schema:[
     {name:'title',selector:{text:{}}},
     {name:'show_header',selector:{boolean:{}}},
@@ -58,6 +58,12 @@ class AhShoppingCard extends HTMLElement {
       {value:'rear',label:'Rear camera'}
     ]}}},
     {name:'scan_zoom',selector:{number:{min:1,max:4,step:0.25,mode:'slider'}}},
+    {name:'scan_decoder',selector:{select:{options:[
+      {value:'auto',label:'Auto (recommended)'},
+      {value:'zxing',label:'ZXing'},
+      {value:'native',label:'Native BarcodeDetector'},
+      {value:'local',label:'Local EAN'}
+    ]}}},
     {name:'product_source',selector:{select:{options:[
       {value:'shopping_list',label:'Winkelmandje'},
       {value:'next_order',label:'Volgende bestelling'},
@@ -74,6 +80,7 @@ class AhShoppingCard extends HTMLElement {
         : config.product_source;
     const previousCamera=this._config.scan_camera;
     const previousZoom=this._config.scan_zoom;
+    const previousDecoder=this._config.scan_decoder;
     const previousMode=this._config.scanner_mode;
     const {height:_legacyHeight,...cleanConfig}=config;
     this._config={
@@ -85,6 +92,7 @@ class AhShoppingCard extends HTMLElement {
       scanner_mode:'button',
       scan_camera:'front',
       scan_zoom:2,
+      scan_decoder:'auto',
       ...cleanConfig,
       ...(legacySource?{product_source:legacySource}:{})
     };
@@ -100,7 +108,11 @@ class AhShoppingCard extends HTMLElement {
       this._clearScanSession();
     }
 
-    if(this._stream&&(previousCamera!==this._config.scan_camera||Number(previousZoom)!==this._config.scan_zoom)){
+    if(this._stream&&(
+      previousCamera!==this._config.scan_camera||
+      Number(previousZoom)!==this._config.scan_zoom||
+      previousDecoder!==this._config.scan_decoder
+    )){
       this._stopCamera();
     }
     this._render();
@@ -237,19 +249,24 @@ class AhShoppingCard extends HTMLElement {
     }
 
     if(source==='shopping_list_and_order'){
-      const items=this._combinedItems(this._chronologicalShoppingItems(list.items||[]),order.items||[]);
+      const includeOrder=order.is_after_cut_off!==true;
+      const orderItems=includeOrder?(order.items||[]):[];
+      const items=this._combinedItems(this._chronologicalShoppingItems(list.items||[]),orderItems);
       return {
         items,
         total_quantity:items.reduce((sum,i)=>sum+Number(i.quantity||0),0),
-        total_price:Number(list.estimated_total||0)+Number(order.total_price||0),
+        total_price:Number(list.estimated_total||0)+(includeOrder?Number(order.total_price||0):0),
         unique_items:items.length,
         label:'Winkelmandje + bestelling',
         edit_source:'shopping_list',
         combined:true,
-        entity:this._entity()||this._orderEntity(),
-        delivery:order.delivery_date_display||order.delivery_date||'',
-        time:order.delivery_time_display||'',
-        bonus_savings:list.bonus_savings||0
+        entity:this._entity()||(includeOrder?this._orderEntity():null),
+        delivery:includeOrder?(order.delivery_date_display||order.delivery_date||''):'',
+        time:includeOrder?(order.delivery_time_display||''):'',
+        bonus_savings:list.bonus_savings||0,
+        order_included:includeOrder,
+        order_after_cut_off:order.is_after_cut_off===true,
+        order_closing_date_time:order.closing_date_time||''
       };
     }
 
@@ -673,6 +690,7 @@ class AhShoppingCard extends HTMLElement {
     this._barcodeDetector=null;
     this._zxingReader=null;
     this._decoderMode='local';
+    const selected=this._config.scan_decoder||'auto';
 
     const tryZXing=async()=>{
       try{
@@ -716,6 +734,22 @@ class AhShoppingCard extends HTMLElement {
       return false;
     };
 
+    if(selected==='local'){
+      this._decoderMode='local';
+      return;
+    }
+
+    if(selected==='native'){
+      if(await tryNative())return;
+      throw new Error('Native BarcodeDetector wordt niet ondersteund door deze browser. Kies Auto, ZXing of Local EAN.');
+    }
+
+    if(selected==='zxing'){
+      if(await tryZXing())return;
+      throw new Error('ZXing kon niet worden geladen. Kies Auto, Native BarcodeDetector of Local EAN.');
+    }
+
+    // Auto: ZXing first, Native ready as sampled fallback, Local EAN last.
     if(await tryZXing()){
       const primary=this._decoderMode;
       await tryNative();
@@ -723,7 +757,6 @@ class AhShoppingCard extends HTMLElement {
       return;
     }
     if(await tryNative())return;
-
     this._decoderMode='local';
   }
 
@@ -869,20 +902,22 @@ class AhShoppingCard extends HTMLElement {
           }catch(e){}
         }
 
-        // ZXing remains the primary path. Expensive fallbacks are sampled,
-        // not run for every camera frame.
-        if(this._decoderMode==='zxing'&&this._decoderMisses%4===0){
+        // In Auto mode we sample alternate decoders after misses. Explicit
+        // decoder selections stay on the selected engine so users can compare
+        // reliability/performance on their own browser/camera.
+        const autoDecoder=(this._config.scan_decoder||'auto')==='auto';
+        if(autoDecoder&&this._decoderMode==='zxing'&&this._decoderMisses%4===0){
           try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
         }
         const nativeEvery=this._isAndroid?12:4;
-        if(!code&&this._decoderMode==='zxing'&&this._barcodeDetector&&this._decoderMisses>=4&&this._decoderMisses%nativeEvery===0){
+        if(autoDecoder&&!code&&this._decoderMode==='zxing'&&this._barcodeDetector&&this._decoderMisses>=4&&this._decoderMisses%nativeEvery===0){
           try{
             const found=await this._barcodeDetector.detect(c);
             const hit=(found||[]).find(x=>x?.rawValue);
             if(hit)code=String(hit.rawValue).replace(/\D/g,'');
           }catch(e){}
         }
-        if(!code&&this._decoderMode==='native'&&this._decoderMisses%4===0){
+        if(autoDecoder&&!code&&this._decoderMode==='native'&&this._decoderMisses%4===0){
           try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
         }
         if(code)this._decoderMisses=0;
