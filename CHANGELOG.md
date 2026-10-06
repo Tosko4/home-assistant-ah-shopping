@@ -2,6 +2,12 @@
 
 Historical entries describe the behaviour of that version; the [README](README.md) describes the current release.
 
+### 0.2.28
+
+- Reads and transfers only a narrow central camera strip for the first Auto/C++ decoding attempt. Successful strip scans avoid full-crop pixel readback and transfer.
+- Reads the broader crop only after a strip miss, retaining rotated/off-centre searches and existing decoder error handling.
+- Reuses canvas dimensions rather than resetting the drawing buffers on every frame. No new settings or visual changes; the 1.2-second success cooldown remains unchanged.
+
 ### 0.2.27
 
 - Initialises scan audio for automatic/permanent scanners as well as the scan button. Resumes suspended audio on dashboard touches/keyboard interaction, handles rejected resumes and recreates closed audio contexts.

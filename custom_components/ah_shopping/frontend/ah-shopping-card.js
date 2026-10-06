@@ -979,7 +979,7 @@ class AhShoppingCard extends HTMLElement {
 
   async _initWasmWorker(){
     this._stopWasmWorker();
-    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.27');
+    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.28');
     this._decodeWorker=worker;
     await new Promise((resolve,reject)=>{
       const timeout=setTimeout(()=>reject(new Error('Barcode decoder could not be loaded')),10000);
@@ -1001,7 +1001,7 @@ class AhShoppingCard extends HTMLElement {
     };
   }
 
-  _decodeWasm(image,harder){
+  _decodeWasm(image,harder,mode='auto'){
     return new Promise((resolve,reject)=>{
       if(!this._decodeWorker){reject(new Error('Barcode worker unavailable'));return;}
       const id=this._scanCount;
@@ -1015,7 +1015,7 @@ class AhShoppingCard extends HTMLElement {
       };
       this._workerPending=pending;
       try{
-        this._decodeWorker.postMessage({id,width:image.width,height:image.height,pixels:image.data.buffer,harder},[image.data.buffer]);
+        this._decodeWorker.postMessage({id,width:image.width,height:image.height,pixels:image.data.buffer,harder,mode},[image.data.buffer]);
       }catch(error){this._workerPending=null;pending.reject(error);}
     });
   }
@@ -1120,14 +1120,32 @@ class AhShoppingCard extends HTMLElement {
         ? {sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight}
         : this._scanSourceRect(video);
       const targetWidth=Math.min(this._decoderMode==='wasm'?1600:(expand?1280:1200),sw);
-      c.width=Math.max(1,targetWidth);
-      c.height=Math.max(1,Math.floor(sh*c.width/sw));
-      ctx.drawImage(video,sx,sy,sw,sh,0,0,c.width,c.height);
+      const width=Math.max(1,targetWidth),height=Math.max(1,Math.floor(sh*width/sw));
+      const drawFull=()=>{
+        if(c.width!==width)c.width=width;
+        if(c.height!==height)c.height=height;
+        ctx.drawImage(video,sx,sy,sw,sh,0,0,width,height);
+      };
+      if(this._decoderMode!=='wasm')drawFull();
 
       if(this._decoderMode==='wasm'){
         // C++ runs independently of browser BarcodeDetector promises, which can
         // hang indefinitely on some camera/browser combinations.
-        code=await this._decodeWasm(ctx.getImageData(0,0,c.width,c.height),this._decoderMisses>=2&&this._scanCount%3===0);
+        // Read and transfer only the strip first, rather than reading the
+        // whole crop just to discard most of it inside the worker.
+        const band=this._scanBandCanvas ||= document.createElement('canvas');
+        const bandHeight=Math.min(96,height),sourceHeight=bandHeight*sw/width;
+        if(band.width!==width)band.width=width;
+        if(band.height!==bandHeight)band.height=bandHeight;
+        const bandCtx=band.getContext('2d',{willReadFrequently:true});
+        bandCtx.drawImage(video,sx,sy+(sh-sourceHeight)/2,sw,sourceHeight,0,0,width,bandHeight);
+        const harder=this._decoderMisses>=2&&this._scanCount%3===0;
+        code=await this._decodeWasm(bandCtx.getImageData(0,0,width,bandHeight),harder,'strip');
+        if(generation!==this._scanGeneration)return;
+        if(!code){
+          drawFull();
+          code=await this._decodeWasm(ctx.getImageData(0,0,width,height),harder,'full');
+        }
         code=String(code||'').replace(/\D/g,'');
       }else if(this._decoderMode==='zxing'&&this._zxingReader?.decodeFromCanvas){
         try{
@@ -1202,7 +1220,13 @@ class AhShoppingCard extends HTMLElement {
         this._barcodeDetector=null;
         this._decoderMode='local';
         this._setScanStatus(`Decoder-fout: ${e.message||e} · Local EAN actief`,true);
-        try{const c=this._scanCanvas;code=decodeEANFromImageData(c.getContext('2d').getImageData(0,0,c.width,c.height));}catch(fallbackError){}
+        try{
+          const c=this._scanCanvas;
+          c.width=Math.min(1600,video.videoWidth);c.height=Math.max(1,Math.floor(video.videoHeight*c.width/video.videoWidth));
+          const fallbackCtx=c.getContext('2d',{willReadFrequently:true});
+          fallbackCtx.drawImage(video,0,0,c.width,c.height);
+          code=decodeEANFromImageData(fallbackCtx.getImageData(0,0,c.width,c.height));
+        }catch(fallbackError){}
       }else{
         this._setScanStatus(`Scanner-fout: ${e.message||e}`,true);
       }

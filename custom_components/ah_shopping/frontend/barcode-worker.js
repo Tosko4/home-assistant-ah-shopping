@@ -20,8 +20,9 @@ self.onmessage=async({data})=>{
     const bandHeight=Math.min(96,data.height);
     const offset=Math.floor((data.height-bandHeight)/2)*data.width*4;
     const band=new ImageData(pixels.subarray(offset,offset+bandHeight*data.width*4),data.width,bandHeight);
-    let results=await ZXingWASM.readBarcodes(band,{...options,tryHarder:true,tryRotate:false,tryDownscale:false});
-    if(!results.length){
+    let results=[];
+    if(data.mode!=='full')results=await ZXingWASM.readBarcodes(band,{...options,tryHarder:true,tryRotate:false,tryDownscale:false});
+    if(!results.length&&data.mode!=='strip'){
       results=await ZXingWASM.readBarcodes(image,{...options,tryHarder:data.harder,tryInvert:data.harder});
     }
     // A different threshold can recover low-contrast tablet camera images.

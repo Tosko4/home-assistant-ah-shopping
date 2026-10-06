@@ -67,6 +67,19 @@ const server=http.createServer((req,res)=>{
    card._barcodeDetected=code=>{scanned=code;};card._scheduleScan=()=>{};
    for(let i=0;i<4;i++)await card._scanFrame();
    const fullPipeline=scanned===ean&&!card._scanBusy;
+   const centered=document.createElement('canvas');centered.width=1200;centered.height=600;
+   const centerCtx=centered.getContext('2d');centerCtx.fillStyle='white';centerCtx.fillRect(0,0,1200,600);centerCtx.drawImage(canvas,350,210);
+   Object.defineProperties(centered,{readyState:{value:4},videoWidth:{value:1200},videoHeight:{value:600}});
+   const decodeOriginal=card._decodeWasm;let transfers=[];
+   card._decodeWasm=function(image,harder,mode){transfers.push({height:image.height,width:image.width,mode});return decodeOriginal.call(this,image,harder,mode);};
+   card._scanner={querySelector:s=>s==='video'?centered:null};card._decoderMisses=0;card._scanCount=0;scanned='';
+   await card._scanFrame();
+   const stripOnlyTransfer=scanned===ean&&transfers.length===1&&transfers[0].mode==='strip'&&transfers[0].height===96;
+   Object.defineProperties(rotated,{readyState:{value:4},videoWidth:{value:180},videoHeight:{value:500}});
+   card._scanner={querySelector:s=>s==='video'?rotated:null};card._decoderMisses=2;card._scanCount=3;scanned='';transfers=[];
+   await card._scanFrame();
+   const rotatedPipeline=scanned===ean&&transfers.some(x=>x.mode==='full');
+   card._decodeWasm=decodeOriginal;card._scanner={querySelector:s=>s==='video'?canvas:null};
    const worker=card._decodeWorker;card._decodeWorker={postMessage(){},terminate(){}};
    let timeoutRecovered=false;
    try{await decode(canvas);}catch(error){timeoutRecovered=/antwoordt niet/.test(error.message)&&card._workerPending===null;}
@@ -119,11 +132,11 @@ const server=http.createServer((req,res)=>{
    const cooldown=card._scanLoop!=null&&scheduled===1;
    card._cancelScheduledScan();window.requestAnimationFrame=originalRAF;window.cancelAnimationFrame=originalCancel;
    card._cancelScheduledScan();card._stopWasmWorker();
-   return {normal,fastBand,smallCode,softCode,skewCode,cropMargins,rotatedCode,offCenter,immediate,cooldown,noFalsePositive,duplicateProtected,nativeIndependent,fullPipeline,timeoutRecovered,nativeTimeout,failureRecovered,successGreen,cooldownBlocks,redAfterCooldown,pauseNotAbsence,heldAfterPause,deliberateRepeat,pendingBlocks,failedNoCooldown,cleanVisuals};
+   return {normal,fastBand,smallCode,softCode,skewCode,cropMargins,rotatedCode,offCenter,stripOnlyTransfer,rotatedPipeline,immediate,cooldown,noFalsePositive,duplicateProtected,nativeIndependent,fullPipeline,timeoutRecovered,nativeTimeout,failureRecovered,successGreen,cooldownBlocks,redAfterCooldown,pauseNotAbsence,heldAfterPause,deliberateRepeat,pendingBlocks,failedNoCooldown,cleanVisuals};
   });
   for(const key of ['normal','fastBand','smallCode','softCode','skewCode','rotatedCode','offCenter'])assert.equal(results[key],'4006381333931',key);
   assert.equal(results.cropMargins,true,'portrait camera crop includes quiet zones');
-  for(const key of ['nativeIndependent','fullPipeline','timeoutRecovered','nativeTimeout','failureRecovered'])assert.equal(results[key],true,key);
+  for(const key of ['nativeIndependent','fullPipeline','stripOnlyTransfer','rotatedPipeline','timeoutRecovered','nativeTimeout','failureRecovered'])assert.equal(results[key],true,key);
   for(const key of ['successGreen','cooldownBlocks','redAfterCooldown','pauseNotAbsence','heldAfterPause','deliberateRepeat','pendingBlocks','failedNoCooldown','cleanVisuals'])assert.equal(results[key],true,key);
   assert.equal(results.noFalsePositive,true);assert.equal(results.duplicateProtected,true);
   assert.equal(results.immediate,true);assert.equal(results.cooldown,true);
@@ -165,9 +178,9 @@ const server=http.createServer((req,res)=>{
    c._scanCanvas=document.createElement('canvas');c._decoderMode='wasm';let attempts=0;
    c._decodeWasm=async()=>{attempts++;return '';};
    const originalClock=performance.now;let clock=100;performance.now=()=>clock;
-   await c._scanFrame();await c._scanFrame();const repeatedSkipped=attempts===1;
-   frame++;await c._scanFrame();const newFrameImmediate=attempts===2;
-   clock+=81;await c._scanFrame();const frozenRecovers=attempts===3;
+   await c._scanFrame();await c._scanFrame();const repeatedSkipped=attempts===2;
+   frame++;await c._scanFrame();const newFrameImmediate=attempts===4;
+   clock+=81;await c._scanFrame();const frozenRecovers=attempts===6;
    performance.now=originalClock;
    return {repeatedSkipped,newFrameImmediate,frozenRecovers};
   });
