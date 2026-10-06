@@ -2,6 +2,14 @@
 
 Historical entries describe the behaviour of that version; the [README](README.md) describes the current release.
 
+### 0.2.26
+
+- Requests 1080p camera input on Android as well, preserving more detail in thin barcode bars when supported by the camera.
+- Adds a dense, narrow-strip C++ search before the broader image search, retaining horizontal resolution while reducing work on successful scans.
+- Samples expensive full-frame and exhaustive searches instead of running them on every failed frame; includes a sampled alternative threshold for low-contrast images.
+- Adds a 15% margin around the scan guide so barcode quiet zones are not clipped. No visual changes and no extra pause before recognition.
+- Keeps the 1.2-second successful-scan cooldown and duplicate protection. Adds decoding checks for small, mildly blurred, low-contrast and skewed barcodes.
+
 ### 0.2.25
 
 - Reorganises the README around installation, current features, complete settings, entities/actions and privacy.

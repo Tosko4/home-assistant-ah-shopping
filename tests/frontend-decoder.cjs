@@ -29,6 +29,27 @@ const server=http.createServer((req,res)=>{
    [...bits].forEach((v,i)=>{if(v==='1')ctx.fillRect(60+i*4,35,4,110);});
    let id=0;const decode=async c=>{card._scanCount=++id;return card._decodeWasm(c.getContext('2d').getImageData(0,0,c.width,c.height),true);};
    const normal=await decode(canvas);
+   card._scanCount=++id;
+   const fastBand=await card._decodeWasm(ctx.getImageData(0,0,canvas.width,canvas.height),false);
+   const small=document.createElement('canvas');small.width=250;small.height=90;
+   const sctx=small.getContext('2d');sctx.drawImage(canvas,0,0,250,90);
+   const smallCode=await decode(small);
+   const soft=document.createElement('canvas');soft.width=500;soft.height=180;
+   const softCtx=soft.getContext('2d');softCtx.filter='blur(0.6px)';softCtx.drawImage(canvas,0,0);
+   const softened=softCtx.getImageData(0,0,500,180);
+   for(let i=0;i<softened.data.length;i+=4){
+    const grey=90+softened.data[i]*.4;
+    softened.data[i]=softened.data[i+1]=softened.data[i+2]=grey;
+   }
+   softCtx.putImageData(softened,0,0);const softCode=await decode(soft);
+   const skew=document.createElement('canvas');skew.width=600;skew.height=350;
+   const skewCtx=skew.getContext('2d');skewCtx.fillStyle='white';skewCtx.fillRect(0,0,600,350);
+   skewCtx.translate(300,175);skewCtx.rotate(.18);skewCtx.drawImage(canvas,-250,-90);
+   const skewCode=await decode(skew);
+   const cropCard=document.createElement('ah-shopping-card');
+   cropCard._scanner={getBoundingClientRect:()=>({left:0,top:0,width:720,height:1280}),querySelector:()=>({getBoundingClientRect:()=>({left:100,top:500,right:620,bottom:780})})};
+   const crop=cropCard._scanSourceRect({videoWidth:1920,videoHeight:1080});
+   const cropMargins=crop.sw>438&&crop.sx>=0&&crop.sx+crop.sw<=1920&&crop.sy+crop.sh<=1080;
    const rotated=document.createElement('canvas');rotated.width=180;rotated.height=500;
    const rctx=rotated.getContext('2d');rctx.translate(180,0);rctx.rotate(Math.PI/2);rctx.drawImage(canvas,0,0);
    const rotatedCode=await decode(rotated);
@@ -98,9 +119,10 @@ const server=http.createServer((req,res)=>{
    const cooldown=card._scanLoop!=null&&scheduled===1;
    card._cancelScheduledScan();window.requestAnimationFrame=originalRAF;window.cancelAnimationFrame=originalCancel;
    card._cancelScheduledScan();card._stopWasmWorker();
-   return {normal,rotatedCode,offCenter,immediate,cooldown,noFalsePositive,duplicateProtected,nativeIndependent,fullPipeline,timeoutRecovered,nativeTimeout,failureRecovered,successGreen,cooldownBlocks,redAfterCooldown,pauseNotAbsence,heldAfterPause,deliberateRepeat,pendingBlocks,failedNoCooldown,cleanVisuals};
+   return {normal,fastBand,smallCode,softCode,skewCode,cropMargins,rotatedCode,offCenter,immediate,cooldown,noFalsePositive,duplicateProtected,nativeIndependent,fullPipeline,timeoutRecovered,nativeTimeout,failureRecovered,successGreen,cooldownBlocks,redAfterCooldown,pauseNotAbsence,heldAfterPause,deliberateRepeat,pendingBlocks,failedNoCooldown,cleanVisuals};
   });
-  for(const key of ['normal','rotatedCode','offCenter'])assert.equal(results[key],'4006381333931',key);
+  for(const key of ['normal','fastBand','smallCode','softCode','skewCode','rotatedCode','offCenter'])assert.equal(results[key],'4006381333931',key);
+  assert.equal(results.cropMargins,true,'portrait camera crop includes quiet zones');
   for(const key of ['nativeIndependent','fullPipeline','timeoutRecovered','nativeTimeout','failureRecovered'])assert.equal(results[key],true,key);
   for(const key of ['successGreen','cooldownBlocks','redAfterCooldown','pauseNotAbsence','heldAfterPause','deliberateRepeat','pendingBlocks','failedNoCooldown','cleanVisuals'])assert.equal(results[key],true,key);
   assert.equal(results.noFalsePositive,true);assert.equal(results.duplicateProtected,true);

@@ -733,8 +733,8 @@ class AhShoppingCard extends HTMLElement {
       const stream=await navigator.mediaDevices.getUserMedia({
         video:{
           facingMode:{ideal:this._facing},
-          width:{ideal:this._isAndroid?1280:1920},
-          height:{ideal:this._isAndroid?720:1080},
+          width:{ideal:1920},
+          height:{ideal:1080},
           frameRate:{ideal:30,max:30}
         },
         audio:false
@@ -959,7 +959,7 @@ class AhShoppingCard extends HTMLElement {
 
   async _initWasmWorker(){
     this._stopWasmWorker();
-    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.24');
+    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.26');
     this._decodeWorker=worker;
     await new Promise((resolve,reject)=>{
       const timeout=setTimeout(()=>reject(new Error('Barcode decoder could not be loaded')),10000);
@@ -1058,12 +1058,13 @@ class AhShoppingCard extends HTMLElement {
     ex=Math.max(sx+1,Math.min(vw,ex));
     ey=Math.max(sy+1,Math.min(vh,ey));
 
-    return {
-      sx:Math.floor(sx),
-      sy:Math.floor(sy),
-      sw:Math.max(1,Math.floor(ex-sx)),
-      sh:Math.max(1,Math.floor(ey-sy))
-    };
+    // Include the quiet zones outside the drawn guide; clipping these makes
+    // an otherwise sharp EAN unreadable, especially on portrait tablets.
+    const padX=(ex-sx)*.15,padY=(ey-sy)*.15;
+    const left=Math.floor(Math.max(0,sx-padX)),top=Math.floor(Math.max(0,sy-padY));
+    return {sx:left,sy:top,
+      sw:Math.max(1,Math.floor(Math.min(vw,ex+padX))-left),
+      sh:Math.max(1,Math.floor(Math.min(vh,ey+padY))-top)};
   }
 
   async _scanFrame(){
@@ -1084,11 +1085,11 @@ class AhShoppingCard extends HTMLElement {
 
     try{
       const c=this._scanCanvas,ctx=c.getContext('2d',{willReadFrequently:true});
-      const expand=this._decoderMisses>=2&&this._scanCount%2===0;
+      const expand=this._decoderMisses>=2&&this._scanCount%4===0;
       const {sx,sy,sw,sh}=expand
         ? {sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight}
         : this._scanSourceRect(video);
-      const targetWidth=Math.min(expand?1280:1200,sw);
+      const targetWidth=Math.min(this._decoderMode==='wasm'?1600:(expand?1280:1200),sw);
       c.width=Math.max(1,targetWidth);
       c.height=Math.max(1,Math.floor(sh*c.width/sw));
       ctx.drawImage(video,sx,sy,sw,sh,0,0,c.width,c.height);
@@ -1096,7 +1097,7 @@ class AhShoppingCard extends HTMLElement {
       if(this._decoderMode==='wasm'){
         // C++ runs independently of browser BarcodeDetector promises, which can
         // hang indefinitely on some camera/browser combinations.
-        code=await this._decodeWasm(ctx.getImageData(0,0,c.width,c.height),this._decoderMisses>=2);
+        code=await this._decodeWasm(ctx.getImageData(0,0,c.width,c.height),this._decoderMisses>=2&&this._scanCount%3===0);
         code=String(code||'').replace(/\D/g,'');
       }else if(this._decoderMode==='zxing'&&this._zxingReader?.decodeFromCanvas){
         try{
