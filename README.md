@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.22
+## 0.2.23
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -473,3 +473,10 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Bounds worker/native detection requests and recovers to Local EAN after a runtime decoder failure, with a visible error. Releases the busy flag even if read-feedback processing fails.
 - Shows the running card version, decoder and scan counter in the camera view to distinguish a stalled scan loop from unsuccessful recognition.
 - Extends browser tests to cover the complete crop/full-frame scan path, a stalled browser API, worker timeouts, error recovery and callback-independent scheduling.
+
+### 0.2.23
+
+- Extends the cooldown after a successful AH addition to 1.2 seconds. The horizontal scan line is green during this pause and returns to red when scanning resumes.
+- Removes the green border flash, temporary barcode-read message and version/decoder/scanteller overlay. Decoder and AH errors remain visible.
+- Does not count cooldown time as barcode absence. A held barcode remains protected after the pause, while removing it for more than 700 ms allows an intentional rescan. Blocks duplicate additions while an AH request is pending and discards in-flight decoded frames during cooldown.
+- Tests successful-add-only cooldown, green/red scan feedback, held-code protection after the pause, intentional rescans, pending requests and failed additions.
