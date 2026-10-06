@@ -71,10 +71,12 @@ Available product sources:
 ```yaml
 product_source: shopping_list            # Winkelmandje (AH Mijn lijst), editable
 product_source: next_order               # eerstvolgende ingeplande bestelling, read-only
-product_source: shopping_list_and_order  # Winkelmandje + volgende bestelling, read-only
+product_source: shopping_list_and_order  # Winkelmandje + volgende bestelling
 ```
 
 The combined view merges identical products by product id but keeps the two source quantities separate. The displayed quantity is the combined total. The **Bestelling** quantity is a hard read-only minimum: minus only removes extra Winkelmandje quantity and disappears when the total reaches the ordered quantity. Plus is always available for product rows and adds one to Winkelmandje, including products that currently exist only in the scheduled order. The scheduled order is never modified.
+
+AH exposes the order cut-off directly through the fulfillment fields `isAfterCutOff` and `closingDateTime`. As soon as `isAfterCutOff` becomes true, the scheduled order is no longer included in **Winkelmandje + volgende bestelling**: its product rows, quantities, delivery slot and order total are all removed from the combined card. The separate **Volgende bestelling** source remains available as a read-only overview after cut-off.
 
 For backwards compatibility, old `product_source: cart` cards automatically map to `shopping_list`, and old `cart_and_order` cards map to `shopping_list_and_order`.
 
@@ -102,6 +104,7 @@ product_source: shopping_list_and_order
 scanner_mode: button
 scan_camera: front
 scan_zoom: 2
+scan_decoder: auto
 ```
 
 For a dedicated scanner card next to a separate shopping-list card, use permanent mode:
@@ -111,6 +114,7 @@ type: custom:ah-shopping-card
 scanner_mode: permanent
 scan_camera: front
 scan_zoom: 2
+scan_decoder: auto
 show_header: false
 ```
 
@@ -128,7 +132,7 @@ For a quick camera test, use EAN-13 `8710400169468` (AH Biologisch Halfvolle mel
 
 Camera access uses `navigator.mediaDevices.getUserMedia()` on the device displaying the dashboard. HTTPS is strongly recommended and may be required by the browser/WebView. On Android/Fully Kiosk, allow camera permission for Fully Kiosk. On iPhone/iPad, allow camera permission for the browser/Home Assistant WebView.
 
-The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. It uses the browser's native BarcodeDetector when available, then ZXing 0.23.0 as the main fallback, and finally the bundled lightweight EAN decoder as a last-resort fallback.
+The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. `scan_decoder` can be set to `auto` (default/recommended), `zxing`, `native` or `local`. Auto uses ZXing as the primary decoder, keeps Native BarcodeDetector available as a sampled fallback when supported, and uses the bundled lightweight EAN decoder as the final fallback. Explicit decoder selections stay on the selected engine so users can compare what works best for their camera/browser. If a forced decoder is unavailable, the card shows a clear error instead of silently switching engines.
 
 ## Entities
 
@@ -395,3 +399,13 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Improves desktop/laptop scanning by using ZXing as the primary decoder, requesting up to 1920×1080, retrying a central barcode band and sampling native detection more often.
 - Adds explicit scanner feedback when a barcode was decoded correctly but Albert Heijn has no matching product.
 - Keeps the permanent scanner header synchronized with live Home Assistant entity data instead of remaining at initial placeholder totals.
+
+
+### 0.2.14
+
+- Reads AH fulfillment `reopenable`, `modifiable`, `isAfterCutOff`, `closingDateTime` and transaction state for the next scheduled order.
+- Stops merging scheduled-order products into **Winkelmandje + volgende bestelling** as soon as AH reports `isAfterCutOff: true`.
+- Removes the cut-off order's quantity, price and delivery information from the combined card while keeping the separate **Volgende bestelling** source available as a read-only overview.
+- Adds a card-level barcode decoder selector: **Auto (recommended)**, **ZXing**, **Native BarcodeDetector** or **Local EAN**.
+- Forced decoder modes stay on the selected engine, making it possible to compare scanner performance per device/browser.
+- Shows a clear error when a forced decoder is unavailable instead of silently falling back.
