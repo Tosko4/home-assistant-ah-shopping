@@ -154,7 +154,7 @@ Legacy `product_source: cart` / `cart_and_order` map to `shopping_list` / `shopp
 - Button modes close after **60 seconds without a first successful scan**, or **10 seconds after the latest successful scan**. Permanent mode does not auto-close.
 - A successful AH addition starts a **1.2-second pause**. The horizontal line turns green for that pause, then red when scanning resumes. Failed decoding attempts have no fixed retry delay.
 - A barcode held in view is not repeatedly added. To intentionally scan the same product again, remove it from view for more than **700 ms after the pause**, then present it again.
-- The newest overlay row stays for **10 seconds**. When a new scan makes it translucent, it gets **5 seconds**. Older translucent rows retain their deadlines.
+- Up to five scanned products appear over the camera. The newest overlay row stays for **10 seconds**. When a new scan makes it translucent, it gets **5 seconds**. Older translucent rows retain their deadlines.
 - Plus/minus in the overlay updates the existing row without rebuilding the feed, and restarts that row's current 10- or 5-second period.
 - A last-quantity removal in the ordinary list stays at **0 for four seconds**, allowing plus to restore it before deletion. Leaving the dashboard commits an outstanding removal.
 - These timings are built-in behaviour, **not configurable settings**.
