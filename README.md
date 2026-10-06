@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.23
+## 0.2.24
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -480,3 +480,11 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Removes the green border flash, temporary barcode-read message and version/decoder/scanteller overlay. Decoder and AH errors remain visible.
 - Does not count cooldown time as barcode absence. A held barcode remains protected after the pause, while removing it for more than 700 ms allows an intentional rescan. Blocks duplicate additions while an AH request is pending and discards in-flight decoded frames during cooldown.
 - Tests successful-add-only cooldown, green/red scan feedback, held-code protection after the pause, intentional rescans, pending requests and failed additions.
+
+### 0.2.24
+
+- Keeps the last editable quantity at zero for four seconds before deleting the product, with an active plus button to restore it. The row then fades and collapses over 320 ms. Quantity changes and refreshes preserve its position during the undo period.
+- Keeps products already in the order when only their extra cart quantity is removed. Failed deletions restore the row; leaving the dashboard commits outstanding removals.
+- Displays the newest scanned product for ten seconds. When a new scan makes the previous top row translucent, that row gets five seconds; older translucent rows keep their existing deadlines. Plus/minus adjustments restart the current row's ten- or five-second period. Expired feed rows fade and collapse.
+- Updates scanner quantities by patching retained rows/buttons instead of rebuilding the feed, preserving focus, images and running animations.
+- Adds browser coverage for the undo period, smooth height transition, pending writes, undo, errors, ordered-product retention, navigation, feed expiry and unchanged feed nodes during quantity adjustments.
