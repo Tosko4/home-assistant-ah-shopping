@@ -1,4 +1,8 @@
 const SCAN_COOLDOWN_MS=1200;
+const REMOVAL_UNDO_MS=4000;
+const REMOVAL_ANIMATION_MS=320;
+const SCAN_FEED_TOP_MS=10000;
+const SCAN_FEED_DIMMED_MS=5000;
 const EAN_L=["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
 const EAN_G=["0100111","0110011","0011011","0100001","0011101","0111001","0000101","0010001","0001001","0010111"];
 const EAN_R=EAN_L.map(p=>[...p].map(c=>c==="1"?"0":"1").join(""));
@@ -43,7 +47,7 @@ function decodeEANFromImageData(imageData){
 }
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._scanVideoFrame=null; this._scanAnimationFrame=null; this._decodeWorker=null; this._workerPending=null; this._scanGeneration=0; this._scanCooldownUntil=0; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._barcodeAbsentSince=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._autoScannerRoute=''; this._autoVisitArmed=true; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._scanBandCanvas=null; this._scanStatusTimer=null; this._isAndroid=/Android/i.test(navigator.userAgent||''); window.__ahShoppingScanOrder=window.__ahShoppingScanOrder||{seq:0,products:new Map()}; this._scanOrderState=window.__ahShoppingScanOrder; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._scanVideoFrame=null; this._scanAnimationFrame=null; this._decodeWorker=null; this._workerPending=null; this._scanGeneration=0; this._scanCooldownUntil=0; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._barcodeAbsentSince=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._rowRemovals=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._scanRecentTimer=null; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._autoScannerRoute=''; this._autoVisitArmed=true; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._scanBandCanvas=null; this._scanStatusTimer=null; this._isAndroid=/Android/i.test(navigator.userAgent||''); window.__ahShoppingScanOrder=window.__ahShoppingScanOrder||{seq:0,products:new Map()}; this._scanOrderState=window.__ahShoppingScanOrder; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2,scan_decoder:'auto'};}
   static getConfigForm(){return {schema:[
     {name:'title',selector:{text:{}}},
@@ -301,29 +305,89 @@ class AhShoppingCard extends HTMLElement {
   _money(n){return new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'}).format(Number(n||0));}
   async _service(service,data={}){if(!this._hass)throw new Error('Home Assistant is niet beschikbaar'); const result=await this._hass.callWS({type:'call_service',domain:'ah_shopping',service,service_data:data,return_response:true}); return result?.response||{};}
   _quantityKey(source,pid){return `${source}:${pid}`;}
+  _cancelRowRemoval(key){
+    const removal=this._rowRemovals.get(key);
+    if(removal)clearTimeout(removal.timer);
+    this._rowRemovals.delete(key);
+  }
+
+  _setQuantity(source,pid,target){
+    const key=this._quantityKey(source,pid);
+    const view=this._viewData();
+    const item=(view.items||[]).find(i=>Number(i.product_id)===pid);
+    this._pendingQty.set(key,target);
+    if(target===0&&item&&!(view.combined&&Number(item.order_quantity||0)>0)){
+      if(!this._rowRemovals.has(key)){
+        const removal={source,pid,item:{...item},index:view.items.indexOf(item),phase:'waiting',height:0,timer:null};
+        this._rowRemovals.set(key,removal);
+        removal.timer=setTimeout(()=>this._beginRowRemoval(key),REMOVAL_UNDO_MS);
+      }
+      this._render();
+      return;
+    }
+    this._cancelRowRemoval(key);
+    this._render();
+    this._queueQuantityWrite(source,pid);
+  }
+
   _adjustQuantity(source,pid,current,delta){
     const key=this._quantityKey(source,pid);
     const base=this._pendingQty.has(key)?this._pendingQty.get(key):Number(current||0);
-    this._pendingQty.set(key,Math.max(0,base+delta));
-    this._render();
-    this._queueQuantityWrite(source,pid);
+    this._setQuantity(source,pid,Math.max(0,base+delta));
   }
-  _remove(source,pid){
-    const key=this._quantityKey(source,pid);
-    this._pendingQty.set(key,0);
+
+  _remove(source,pid){this._setQuantity(source,pid,0);}
+
+  _beginRowRemoval(key){
+    const removal=this._rowRemovals.get(key);
+    if(!removal||this._pendingQty.get(key)!==0)return;
+    clearTimeout(removal.timer);
+    const row=[...this.shadowRoot.querySelectorAll('[data-row-key]')].find(el=>el.dataset.rowKey===this._rowDomKey(removal.item));
+    if(row){
+      removal.height=row.getBoundingClientRect().height;
+      row.style.height=`${removal.height}px`;
+      void row.offsetHeight; // Give the transition a numeric starting height.
+    }
+    removal.phase='closing';
     this._render();
-    this._queueQuantityWrite(source,pid);
+    const duration=window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:REMOVAL_ANIMATION_MS;
+    removal.timer=setTimeout(()=>{
+      if(this._rowRemovals.get(key)!==removal)return;
+      removal.phase='committing';
+      this._render();
+      this._queueQuantityWrite(removal.source,removal.pid);
+    },duration);
   }
+
+  _itemsForRender(view){
+    const items=[...(view.items||[])];
+    for(const [key,removal] of this._rowRemovals){
+      if(removal.source!==view.edit_source)continue;
+      const index=items.findIndex(i=>Number(i.product_id)===removal.pid);
+      if(removal.phase==='committing'){
+        if(index>=0)items.splice(index,1);
+        else if(!this._pendingQty.has(key))this._cancelRowRemoval(key);
+      }else if(index<0){
+        // Keep the undo row even when a refresh temporarily omits the item.
+        items.splice(Math.min(removal.index,items.length),0,{...removal.item,quantity:0,shopping_quantity:0});
+      }
+    }
+    return items;
+  }
+
   _queueQuantityWrite(source,pid){
     const key=this._quantityKey(source,pid);
+    if(this._rowRemovals.has(key)&&this._rowRemovals.get(key).phase!=='committing')return;
     if(this._qtyWorkers.has(key))return;
     const worker=(async()=>{
       while(this._pendingQty.has(key)){
+        if(this._rowRemovals.has(key)&&this._rowRemovals.get(key).phase!=='committing')break;
         const target=this._pendingQty.get(key);
         try{
           await this._service('set_quantity',{product_id:pid,quantity:target});
         }catch(e){
           this._pendingQty.delete(key);
+          this._cancelRowRemoval(key);
           this._toast(e.message||String(e),true);
           break;
         }
@@ -428,7 +492,7 @@ class AhShoppingCard extends HTMLElement {
 
     const {view,title,leftNote,totalMeta,total}=this._headerValues();
     const entity=view.entity;
-    const items=view.items||[];
+    const items=this._itemsForRender(view);
     const showHeader=this._config.show_header!==false;
     const showScan=this._config.show_scan!==false;
     const showProducts=this._config.show_products!==false;
@@ -481,7 +545,7 @@ class AhShoppingCard extends HTMLElement {
   _patchChildren(parent,fresh){
     const key=node=>{
       if(node.nodeType!==1)return '';
-      for(const action of ['data-plus','data-minus','data-remove'])if(node.hasAttribute(action))return action;
+      for(const action of ['data-plus','data-minus','data-remove','data-scan-plus','data-scan-minus'])if(node.hasAttribute(action))return action;
       return node.getAttribute('data-row-key')||node.id||node.getAttribute('class')||'';
     };
     const existing=[...parent.childNodes];
@@ -544,6 +608,9 @@ class AhShoppingCard extends HTMLElement {
     const key=editSource&&i.product_id>0?this._quantityKey(editSource,i.product_id):'';
     const pendingQty=key&&this._pendingQty.has(key)?this._pendingQty.get(key):editableQty;
     const displayQty=combined?pendingQty+Number(i.order_quantity||0):(key&&this._pendingQty.has(key)?pendingQty:Number(i.quantity||0));
+    const removal=this._rowRemovals.get(key);
+    const rowClass=removal?.phase==='closing'?'rowRemoving':removal?'rowUndo':'';
+    const rowStyle=removal?.height?`height:${removal.height}px`:'';
 
     if(combined){
       const orderQty=Number(i.order_quantity||0);
@@ -560,7 +627,7 @@ class AhShoppingCard extends HTMLElement {
       const controls=i.product_id>0
         ? `<div class="qty compactQty combinedQty">${shoppingQty>0?`<button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${shoppingQty}" aria-label="Verlaag totaal">−</button>`:''}<span title="${orderQty} besteld + ${shoppingQty} winkelmandje">${totalQty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${shoppingQty}" aria-label="Voeg toe aan winkelmandje">+</button></div>`
         : `<div class="qty readonlyQty"><span>${totalQty}×</span></div>`;
-      return this._productRow(i,{controls,compact:true,metaHtml:meta,rowKey:this._rowDomKey(i)});
+      return this._productRow(i,{controls,compact:true,metaHtml:meta,rowKey:this._rowDomKey(i),rowClass,style:rowStyle});
     }
 
     const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:'';
@@ -569,9 +636,9 @@ class AhShoppingCard extends HTMLElement {
     const bonus=i.is_bonus?`<span class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</span>`:'';
     const meta=[unit,price,bonus].filter(Boolean).join('');
     const controls=editSource&&i.product_id>0
-      ? `<div class="qty compactQty"><button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}">−</button><span>${displayQty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}">+</button><button class="trash" data-remove data-source="${editSource}" data-pid="${i.product_id}">×</button></div>`
+      ? `<div class="qty compactQty"><button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}" ${displayQty<=0?'disabled':''}>−</button><span>${displayQty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}">+</button><button class="trash" data-remove data-source="${editSource}" data-pid="${i.product_id}">×</button></div>`
       : `<div class="qty compactQty readonlyQty"><span>${displayQty}×</span></div>`;
-    return this._productRow(i,{controls,compact:true,metaHtml:meta,rowKey:this._rowDomKey(i)});
+    return this._productRow(i,{controls,compact:true,metaHtml:meta,rowKey:this._rowDomKey(i),rowClass,style:rowStyle});
   }
 
   _openScanner(){
@@ -586,6 +653,7 @@ class AhShoppingCard extends HTMLElement {
     this._heldBarcodeLastSeen=0; this._barcodeAbsentSince=0;
     this._scanProduct=null;
     this._scanRecent=[];
+    clearTimeout(this._scanRecentTimer);this._scanRecentTimer=null;
     this._scannerRoute=this._routeKey();
     this._scanInlineActive=true;
     this._render();
@@ -891,7 +959,7 @@ class AhShoppingCard extends HTMLElement {
 
   async _initWasmWorker(){
     this._stopWasmWorker();
-    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.23');
+    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.24');
     this._decodeWorker=worker;
     await new Promise((resolve,reject)=>{
       const timeout=setTimeout(()=>reject(new Error('Barcode decoder could not be loaded')),10000);
@@ -1197,25 +1265,54 @@ class AhShoppingCard extends HTMLElement {
   _pushRecentProduct(product){
     const pid=Number(product?.id||0);
     const barcode=String(product?.barcode||'');
+    const previousTop=this._scanRecent[0];
+    if(previousTop&&!previousTop._feedLeaving)previousTop._feedExpiresAt=Date.now()+SCAN_FEED_DIMMED_MS;
     this._scanRecent=[
-      {...product},
+      {...product,_feedExpiresAt:Date.now()+SCAN_FEED_TOP_MS,_feedLeaving:0,_feedHeight:0},
       ...this._scanRecent.filter(item=>{
         const sameId=pid>0&&Number(item?.id||0)===pid;
         const sameBarcode=barcode&&String(item?.barcode||'')===barcode;
         return !sameId&&!sameBarcode;
       })
     ].slice(0,5);
+    this._scheduleRecentExpiry();
+  }
+
+  _feedRowKey(product){return `scan:${product.id||product.barcode||product.title}`;}
+
+  _scheduleRecentExpiry(){
+    clearTimeout(this._scanRecentTimer);
+    this._scanRecentTimer=null;
+    if(!this._scanRecent.length)return;
+    const deadlines=this._scanRecent.map(p=>p._feedLeaving?p._feedLeaving+REMOVAL_ANIMATION_MS:p._feedExpiresAt);
+    this._scanRecentTimer=setTimeout(()=>this._expireRecentProducts(),Math.max(0,Math.min(...deadlines)-Date.now()));
+  }
+
+  _expireRecentProducts(){
+    const now=Date.now();
+    this._scanRecent=this._scanRecent.filter(p=>!p._feedLeaving||now<p._feedLeaving+REMOVAL_ANIMATION_MS);
+    for(const p of this._scanRecent){
+      if(!p._feedLeaving&&now>=p._feedExpiresAt){
+        const row=[...this._scanner?.querySelectorAll?.('[data-row-key]')||[]].find(el=>el.dataset.rowKey===this._feedRowKey(p));
+        if(row){p._feedHeight=row.getBoundingClientRect().height;row.style.height=`${p._feedHeight}px`;void row.offsetHeight;}
+        p._feedLeaving=now;
+      }
+    }
+    this._renderScanResult();
+    this._scheduleRecentExpiry();
   }
 
   _renderScanResult(){
     const result=this._scanner?.querySelector('#scanRecent');
     if(!result)return;
-    result.innerHTML=this._scanRecent.map((p,index)=>this._scanOverlayRow(p,index)).join('');
+    const template=document.createElement('template');
+    template.innerHTML=this._scanRecent.map((p,index)=>this._scanOverlayRow(p,index)).join('');
+    this._patchChildren(result,template.content);
     result.querySelectorAll('[data-scan-minus]').forEach(el=>
-      el.addEventListener('click',()=>this._adjustScanQuantity(Number(el.dataset.pid),-1))
+      el.onclick=()=>this._adjustScanQuantity(Number(el.dataset.pid),-1)
     );
     result.querySelectorAll('[data-scan-plus]').forEach(el=>
-      el.addEventListener('click',()=>this._adjustScanQuantity(Number(el.dataset.pid),1))
+      el.onclick=()=>this._adjustScanQuantity(Number(el.dataset.pid),1)
     );
   }
 
@@ -1230,7 +1327,7 @@ class AhShoppingCard extends HTMLElement {
     const controls=Number(p.id||0)>0
       ? `<div class="qty compactQty">${qty>0?`<button data-scan-minus data-pid="${p.id}" aria-label="Verlaag aantal">−</button>`:''}<span>${qty}</span><button data-scan-plus data-pid="${p.id}" aria-label="Voeg toe">+</button></div>`
       : `<div class="qty readonlyQty"><span>${qty}×</span></div>`;
-    return this._productRow(p,{controls,compact:true,rowClass:'scanOverlayItem',style:`opacity:${opacity}`,metaHtml:meta});
+    return this._productRow(p,{controls,compact:true,rowClass:`scanOverlayItem${p._feedLeaving?' rowRemoving':''}`,style:`opacity:${opacity}${p._feedHeight?`;height:${p._feedHeight}px`:''}`,metaHtml:meta,rowKey:this._feedRowKey(p)});
   }
 
   _adjustScanQuantity(pid,delta){
@@ -1239,6 +1336,8 @@ class AhShoppingCard extends HTMLElement {
     const pending=this._scanPendingQty.has(pid)?this._scanPendingQty.get(pid):Number(p.quantity_on_list??0);
     const next=Math.max(0,pending+delta);
     p.quantity_on_list=next;
+    p._feedExpiresAt=Date.now()+(this._scanRecent[0]===p?SCAN_FEED_TOP_MS:SCAN_FEED_DIMMED_MS);p._feedLeaving=0;p._feedHeight=0;
+    this._scheduleRecentExpiry();
     if(Number(this._scanProduct?.id||0)===Number(pid))this._scanProduct.quantity_on_list=next;
     this._scanPendingQty.set(Number(pid),next);
     this._renderScanResult();
@@ -1295,6 +1394,7 @@ class AhShoppingCard extends HTMLElement {
     this._scanner=null;
     this._scanProduct=null;
     this._scanRecent=[];
+    clearTimeout(this._scanRecentTimer);this._scanRecentTimer=null;
     this._scanProcessing=false;
     this._heldBarcode='';
     this._scanInlineActive=false;
@@ -1308,6 +1408,7 @@ class AhShoppingCard extends HTMLElement {
 
   _clearScanSession(){
     this._scanRecent=[];
+    clearTimeout(this._scanRecentTimer);this._scanRecentTimer=null;
     this._scanProduct=null;
     this._scanQueue=[];
     this._scanProcessing=false;
@@ -1414,6 +1515,12 @@ class AhShoppingCard extends HTMLElement {
   }
 
   disconnectedCallback(){
+    // Leaving the dashboard commits an outstanding removal rather than losing it.
+    for(const removal of this._rowRemovals.values()){
+      clearTimeout(removal.timer);
+      removal.phase='committing';
+      this._queueQuantityWrite(removal.source,removal.pid);
+    }
     this._autoVisitArmed=true;
     this._clearScannerTimer();
     document.removeEventListener('visibilitychange',this._visibilityHandler);
@@ -1428,7 +1535,7 @@ class AhShoppingCard extends HTMLElement {
     this._clearScanSession();
   }
 
-  _css(){return `:host{display:block;height:100%;min-height:0;overflow:hidden}ha-card{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}.fullCard{height:100%;min-height:0;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{overflow-anchor:none;flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:minmax(24px,auto) 18px;column-gap:16px;row-gap:5px;align-items:center;padding:18px 18px 12px}.title{grid-column:1;grid-row:1;align-self:center;min-width:0;font-size:20px;font-weight:700;line-height:24px;margin:0}.total{grid-column:2;grid-row:1;align-self:center;text-align:right;font-size:21px;font-weight:700;line-height:24px;margin:0}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px}.headerSub,.headerMeta{display:block;align-self:baseline;min-width:0;margin:0;font-size:12px;font-weight:400;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.headerSub{grid-column:1;grid-row:2}.headerMeta{grid-column:2;grid-row:2;text-align:right;color:var(--secondary-text-color)}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.unitSize{font-size:11px;color:var(--secondary-text-color);white-space:nowrap}.combinedBreakdown{font-size:10px;color:var(--secondary-text-color);white-space:nowrap}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.combinedQty span{font-size:13px;font-weight:700;min-width:22px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.inlineScanner{position:relative;flex:1 1 0;min-height:0;width:100%;overflow:hidden;background:#000}.inlineScanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transform-origin:center center;will-change:transform}.scanGuide{position:absolute;z-index:2;left:5%;right:5%;top:40%;height:20%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}.scanGuide:after{content:'';position:absolute;left:7%;right:7%;top:50%;height:2px;background:#f33}.scanRecent{position:absolute;z-index:4;top:10px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px;max-height:78%;overflow:hidden;pointer-events:none}.scanRecent.withClose{right:58px}.scanOverlayItem{pointer-events:auto;background:var(--card-background-color);border:0!important;border-radius:10px;box-shadow:0 2px 10px #0005;animation:scanRowIn .18s ease-out}.scanOverlayItem .compactMeta{min-height:14px}.scanOverlayItem .qty button{background:var(--secondary-background-color)}.scanClose{position:absolute;z-index:6;top:10px;right:10px;width:38px;height:38px;padding:0;border-radius:50%;background:#0009;color:#fff;font-size:24px;line-height:38px;backdrop-filter:blur(4px)}.scanHud{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:flex;justify-content:flex-end;align-items:flex-end;gap:8px;pointer-events:none}.scanPill{display:inline-block;max-width:70%;padding:5px 8px;border-radius:999px;background:#0009;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px)}.scanPill[hidden]{display:none!important}.scanStatus.error{margin-right:auto;max-width:min(72%,560px);padding:9px 12px;border-radius:10px;background:var(--error-color,#c62828);font-size:13px;font-weight:650;white-space:normal;line-height:1.3;box-shadow:0 3px 12px #0007}.scanTimer{max-width:none}.inlineScanner.scanCooldown .scanGuide:after{background:#00a03c}@keyframes scanRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0)}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.scanOverlayItem{grid-template-columns:42px minmax(0,1fr) auto}.scanOverlayItem .qty{grid-column:auto;justify-content:flex-end}.scanOverlayItem img,.scanOverlayItem .ph{width:38px;height:38px}.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
+  _css(){return `:host{display:block;height:100%;min-height:0;overflow:hidden}ha-card{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}.fullCard{height:100%;min-height:0;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{overflow-anchor:none;flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:minmax(24px,auto) 18px;column-gap:16px;row-gap:5px;align-items:center;padding:18px 18px 12px}.title{grid-column:1;grid-row:1;align-self:center;min-width:0;font-size:20px;font-weight:700;line-height:24px;margin:0}.total{grid-column:2;grid-row:1;align-self:center;text-align:right;font-size:21px;font-weight:700;line-height:24px;margin:0}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px}.headerSub,.headerMeta{display:block;align-self:baseline;min-width:0;margin:0;font-size:12px;font-weight:400;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.headerSub{grid-column:1;grid-row:2}.headerMeta{grid-column:2;grid-row:2;text-align:right;color:var(--secondary-text-color)}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{box-sizing:border-box;display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item.rowUndo{opacity:.6}.item.rowRemoving{height:0!important;opacity:0!important;padding-top:0!important;padding-bottom:0!important;border-top-width:0;overflow:hidden;pointer-events:none;transition:height .32s ease,padding .32s ease,opacity .25s ease,border-top-width .32s ease;box-sizing:border-box}.qty button:disabled{opacity:.35}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.unitSize{font-size:11px;color:var(--secondary-text-color);white-space:nowrap}.combinedBreakdown{font-size:10px;color:var(--secondary-text-color);white-space:nowrap}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.combinedQty span{font-size:13px;font-weight:700;min-width:22px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.inlineScanner{position:relative;flex:1 1 0;min-height:0;width:100%;overflow:hidden;background:#000}.inlineScanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transform-origin:center center;will-change:transform}.scanGuide{position:absolute;z-index:2;left:5%;right:5%;top:40%;height:20%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}.scanGuide:after{content:'';position:absolute;left:7%;right:7%;top:50%;height:2px;background:#f33}.scanRecent{position:absolute;z-index:4;top:10px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px;max-height:78%;overflow:hidden;pointer-events:none}.scanRecent.withClose{right:58px}.scanOverlayItem{pointer-events:auto;background:var(--card-background-color);border:0!important;border-radius:10px;box-shadow:0 2px 10px #0005;animation:scanRowIn .18s ease-out}.scanOverlayItem .compactMeta{min-height:14px}.scanOverlayItem .qty button{background:var(--secondary-background-color)}.scanClose{position:absolute;z-index:6;top:10px;right:10px;width:38px;height:38px;padding:0;border-radius:50%;background:#0009;color:#fff;font-size:24px;line-height:38px;backdrop-filter:blur(4px)}.scanHud{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:flex;justify-content:flex-end;align-items:flex-end;gap:8px;pointer-events:none}.scanPill{display:inline-block;max-width:70%;padding:5px 8px;border-radius:999px;background:#0009;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px)}.scanPill[hidden]{display:none!important}.scanStatus.error{margin-right:auto;max-width:min(72%,560px);padding:9px 12px;border-radius:10px;background:var(--error-color,#c62828);font-size:13px;font-weight:650;white-space:normal;line-height:1.3;box-shadow:0 3px 12px #0007}.scanTimer{max-width:none}.inlineScanner.scanCooldown .scanGuide:after{background:#00a03c}@keyframes scanRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0)}}@media(prefers-reduced-motion:reduce){.item.rowRemoving{transition:none}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.scanOverlayItem{grid-template-columns:42px minmax(0,1fr) auto}.scanOverlayItem .qty{grid-column:auto;justify-content:flex-end}.scanOverlayItem img,.scanOverlayItem .ph{width:38px;height:38px}.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
 }
 if(!customElements.get('ah-shopping-card'))customElements.define('ah-shopping-card',AhShoppingCard);
 window.customCards=window.customCards||[];

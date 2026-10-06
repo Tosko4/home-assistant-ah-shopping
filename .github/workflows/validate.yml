@@ -49,6 +49,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node tests/frontend-scroll.cjs
       - run: node tests/frontend-decoder.cjs
+      - run: node tests/frontend-feedback.cjs
 
   hacs:
     runs-on: ubuntu-latest
