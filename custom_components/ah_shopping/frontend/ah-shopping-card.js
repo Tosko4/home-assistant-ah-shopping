@@ -655,6 +655,11 @@ class AhShoppingCard extends HTMLElement {
 
   async _scanFrame(){
     if(!this._scanner||!this._stream||this._scanBusy)return;
+    if(!this._shouldScannerRun()){
+      if(this._scannerRoute&&this._routeKey()!==this._scannerRoute)this._clearScanSession();
+      this._stopCamera();
+      return;
+    }
     const video=this._scanner.querySelector('video');
     if(video.readyState<2||!video.videoWidth){this._scheduleScan();return;}
 
