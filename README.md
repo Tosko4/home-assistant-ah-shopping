@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.20
+## 0.2.21
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -455,3 +455,13 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Registers the card as a Lovelace module resource in storage resource mode, so dashboard loading waits for the module. Loads the resource collection before writes and updates only this integration's resource URL when its version changes.
 - YAML resource mode retains the automatic frontend fallback. For explicit YAML loading, list `/ah_shopping/ah-shopping-card.js?v=0.2.20` with `type: module` under Lovelace resources.
 - Adds **Albert Heijn Next Order Bonus Savings**. The existing **Albert Heijn Shopping Bonus Savings** continues to represent only the cart; it correctly becomes zero when the cart has no discounted products.
+
+### 0.2.21
+
+- Auto mode uses locally bundled ZXing-C++ 3.1.5/WebAssembly in a worker; native detection is attempted first when supported. Existing explicit decoders remain available, with a new WebAssembly option.
+- Scans the next available video frame after a miss, with no fixed retry delay. Processing is serialized to avoid a growing frame backlog.
+- Applies a 350 ms cooldown only after a successful AH add, while preventing a held barcode from being added repeatedly.
+- Preserves more image detail and expands to full-camera search after misses, alternating with the guide crop. Detects rotated codes through the C++ reader.
+- Shows immediate barcode-read feedback while the AH lookup/add is in progress.
+- Worker and WASM assets are bundled with their licenses; the main scanning path does not require an external CDN. Legacy Auto fallback retains the existing decoders if worker initialization fails.
+- Browser tests cover local worker loading, standard/rotated/off-center EAN images, blank-image rejection, duplicate protection and immediate-frame/success-cooldown scheduling. Real-camera performance still depends on focus, lighting, motion blur and hardware.
