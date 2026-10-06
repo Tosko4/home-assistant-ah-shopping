@@ -1,7 +1,7 @@
 import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._scanCountdownTimer=null; this._scanDeadline=0; this._facing='user'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._syncScannerVisibility());}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._scanCountdownTimer=null; this._scanDeadline=0; this._facing='user'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
@@ -55,6 +55,8 @@ class AhShoppingCard extends HTMLElement {
       this._scanInlineActive=true;
     }else if(previousMode==='permanent'){
       this._scanInlineActive=false;
+      this._scannerRoute='';
+      this._clearScanSession();
     }
 
     if(this._stream&&(previousCamera!==this._config.scan_camera||Number(previousZoom)!==this._config.scan_zoom)){
@@ -232,6 +234,8 @@ class AhShoppingCard extends HTMLElement {
   _render(){
     if(!this.shadowRoot)return;
 
+    if(this._stream)this._stopCamera();
+
     const oldList=this.shadowRoot.querySelector('.items');
     if(oldList)this._listScrollTop=oldList.scrollTop;
 
@@ -300,19 +304,34 @@ class AhShoppingCard extends HTMLElement {
     </div>`;
   }
 
+  _productRow(i,{controls='',compact=false,rowClass='',style='',metaHtml=null}={}){
+    const image=i.image_url
+      ? `<img src="${this._esc(i.image_url)}" alt="">`
+      : '<div class="ph">🛒</div>';
+    const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:'';
+    const price=i.price_now?`<span class="price">${old}${this._money(i.price_now)}</span>`:'';
+    const bonus=i.is_bonus?`<span class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</span>`:'';
+    const details=metaHtml!==null
+      ? `<div class="compactMeta">${metaHtml}</div>`
+      : `<small>${this._esc(i.unit_size||'')}</small>${price}${bonus}`;
+    const classes=['item',compact?'compactItem':'',rowClass].filter(Boolean).join(' ');
+    const styleAttr=style?` style="${style}"`:'';
+    return `<div class="${classes}"${styleAttr}>${image}<div class="info"><b>${this._esc(i.title||i.description||'Product')}</b>${details}</div>${controls}</div>`;
+  }
+
   _item(i,editSource=null,combined=false){
     const editableQty=combined?Number(i.shopping_quantity||0):Number(i.quantity||0);
     const key=editSource&&i.product_id>0?this._quantityKey(editSource,i.product_id):'';
     const pendingQty=key&&this._pendingQty.has(key)?this._pendingQty.get(key):editableQty;
     const displayQty=combined?pendingQty+Number(i.order_quantity||0):(key&&this._pendingQty.has(key)?pendingQty:Number(i.quantity||0));
-    const bonus=i.is_bonus?`<span class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</span>`:'';
-    const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:'';
-    const price=i.price_now?`<span class="price">${old}${this._money(i.price_now)}</span>`:'';
 
     if(combined){
       const orderQty=Number(i.order_quantity||0);
       const shoppingQty=pendingQty;
       const totalQty=orderQty+shoppingQty;
+      const old=i.is_bonus&&i.price_was>i.price_now?`<s>${this._money(i.price_was)}</s> `:'';
+      const price=i.price_now?`<span class="price">${old}${this._money(i.price_now)}</span>`:'';
+      const bonus=i.is_bonus?`<span class="bonus">BONUS · ${this._esc(i.bonus_mechanism||'Aanbieding')}</span>`:'';
       const breakdown=orderQty>0
         ? `${orderQty} besteld${shoppingQty>0?` · ${shoppingQty} extra`:''}`
         : `${shoppingQty} in winkelmandje`;
@@ -320,14 +339,15 @@ class AhShoppingCard extends HTMLElement {
       const controls=i.product_id>0
         ? `<div class="qty compactQty combinedQty">${shoppingQty>0?`<button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${shoppingQty}" aria-label="Verlaag totaal">−</button>`:''}<span title="${orderQty} besteld + ${shoppingQty} winkelmandje">${totalQty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${shoppingQty}" aria-label="Voeg toe aan winkelmandje">+</button></div>`
         : `<div class="qty readonlyQty"><span>${totalQty}×</span></div>`;
-      return `<div class="item compactItem">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><div class="compactMeta">${meta}</div></div>${controls}</div>`;
+      return this._productRow(i,{controls,compact:true,metaHtml:meta});
     }
 
     const controls=editSource&&i.product_id>0
       ? `<div class="qty"><button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}">−</button><span>${displayQty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}">+</button><button class="trash" data-remove data-source="${editSource}" data-pid="${i.product_id}">×</button></div>`
       : `<div class="qty"><span>${displayQty}×</span></div>`;
-    return `<div class="item">${i.image_url?`<img src="${this._esc(i.image_url)}">`:'<div class="ph">🛒</div>'}<div class="info"><b>${this._esc(i.title)}</b><small>${this._esc(i.unit_size||'')}</small>${price}${bonus}</div>${controls}</div>`;
+    return this._productRow(i,{controls});
   }
+
   _openScanner(){
     if(!navigator.mediaDevices?.getUserMedia){
       this._toast('Camera is niet beschikbaar. Gebruik HTTPS en geef cameratoegang.',true);
@@ -340,6 +360,7 @@ class AhShoppingCard extends HTMLElement {
     this._heldBarcodeLastSeen=0;
     this._scanProduct=null;
     this._scanRecent=[];
+    this._scannerRoute=this._routeKey();
     this._scanInlineActive=true;
     this._render();
   }
@@ -580,6 +601,58 @@ class AhShoppingCard extends HTMLElement {
 
   _scheduleScan(){clearTimeout(this._scanLoop);this._scanLoop=setTimeout(()=>this._scanFrame(),90);}
 
+  _scanSourceRect(video){
+    const vw=video.videoWidth,vh=video.videoHeight;
+    const stage=this._scanner;
+    const guide=stage?.querySelector('.scanGuide');
+    if(!stage||!guide||!vw||!vh){
+      const sw=Math.floor(vw*.62/Math.max(1,Number(this._digitalZoom||1)));
+      const sh=Math.floor(vh*.24/Math.max(1,Number(this._digitalZoom||1)));
+      return {sx:Math.max(0,Math.floor((vw-sw)/2)),sy:Math.max(0,Math.floor((vh-sh)/2)),sw,sh};
+    }
+
+    const stageRect=stage.getBoundingClientRect();
+    const guideRect=guide.getBoundingClientRect();
+    const cw=stageRect.width,ch=stageRect.height;
+    if(cw<=0||ch<=0)return {sx:0,sy:0,sw:vw,sh:vh};
+
+    const zoom=Math.max(1,Number(this._digitalZoom||1));
+    const inverseZoom=(value,center)=>(value-center)/zoom+center;
+
+    const gx1=guideRect.left-stageRect.left;
+    const gy1=guideRect.top-stageRect.top;
+    const gx2=guideRect.right-stageRect.left;
+    const gy2=guideRect.bottom-stageRect.top;
+
+    const ux1=inverseZoom(gx1,cw/2);
+    const uy1=inverseZoom(gy1,ch/2);
+    const ux2=inverseZoom(gx2,cw/2);
+    const uy2=inverseZoom(gy2,ch/2);
+
+    const coverScale=Math.max(cw/vw,ch/vh);
+    const displayedW=vw*coverScale;
+    const displayedH=vh*coverScale;
+    const offsetX=(cw-displayedW)/2;
+    const offsetY=(ch-displayedH)/2;
+
+    let sx=(ux1-offsetX)/coverScale;
+    let sy=(uy1-offsetY)/coverScale;
+    let ex=(ux2-offsetX)/coverScale;
+    let ey=(uy2-offsetY)/coverScale;
+
+    sx=Math.max(0,Math.min(vw-1,sx));
+    sy=Math.max(0,Math.min(vh-1,sy));
+    ex=Math.max(sx+1,Math.min(vw,ex));
+    ey=Math.max(sy+1,Math.min(vh,ey));
+
+    return {
+      sx:Math.floor(sx),
+      sy:Math.floor(sy),
+      sw:Math.max(1,Math.floor(ex-sx)),
+      sh:Math.max(1,Math.floor(ey-sy))
+    };
+  }
+
   async _scanFrame(){
     if(!this._scanner||!this._stream||this._scanBusy)return;
     const video=this._scanner.querySelector('video');
@@ -587,24 +660,15 @@ class AhShoppingCard extends HTMLElement {
 
     this._scanBusy=true;
     this._scanCount++;
-    const status=this._scanner.querySelector('#scanstatus');
     let code=null;
 
     try{
       const c=this._scanCanvas,ctx=c.getContext('2d',{willReadFrequently:true});
-      const vw=video.videoWidth,vh=video.videoHeight;
-
-      // Crop only the visual scan guide. This massively reduces work on tablet WebViews.
-      const digitalZoom=Math.max(1,Number(this._digitalZoom||1));
-      const rw=Math.floor(vw*.62/digitalZoom);
-      const rh=Math.floor(vh*.24/digitalZoom);
-      const sx=Math.floor((vw-rw)/2);
-      const sy=Math.floor((vh-rh)/2);
-
-      const targetWidth=Math.min(800,rw);
+      const {sx,sy,sw,sh}=this._scanSourceRect(video);
+      const targetWidth=Math.min(800,sw);
       c.width=Math.max(320,targetWidth);
-      c.height=Math.max(120,Math.floor(rh*c.width/rw));
-      ctx.drawImage(video,sx,sy,rw,rh,0,0,c.width,c.height);
+      c.height=Math.max(120,Math.floor(sh*c.width/sw));
+      ctx.drawImage(video,sx,sy,sw,sh,0,0,c.width,c.height);
 
       if(this._decoderMode==='zxing'&&this._zxingReader?.decodeFromCanvas){
         try{
@@ -618,23 +682,37 @@ class AhShoppingCard extends HTMLElement {
             (window.ZXing?.FormatException&&e instanceof window.ZXing.FormatException);
           if(!expected)console.debug('AH Shopping ZXing crop error',e);
         }
-      }
-
-      // Native BarcodeDetector is a secondary cropped fallback on Android,
-      // or the primary engine on platforms where it performs well.
-      if(!code&&this._barcodeDetector){
+      }else if(this._decoderMode==='native'&&this._barcodeDetector){
         try{
           const found=await this._barcodeDetector.detect(c);
           const hit=(found||[]).find(x=>x?.rawValue);
           if(hit)code=String(hit.rawValue).replace(/\D/g,'');
         }catch(e){}
+      }else if(this._decoderMode==='local'){
+        try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
       }
 
-      // Lightweight local EAN decoder is also tried on the same crop when the main engines miss.
-      if(!code){
-        try{
-          code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));
-        }catch(e){}
+      if(code){
+        this._decoderMisses=0;
+      }else{
+        this._decoderMisses++;
+
+        // ZXing remains the fast primary path. Expensive fallbacks are sampled,
+        // not run for every camera frame.
+        if(this._decoderMode==='zxing'&&this._decoderMisses%4===0){
+          try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
+        }
+        if(!code&&this._decoderMode==='zxing'&&this._barcodeDetector&&this._decoderMisses>=6&&this._decoderMisses%12===0){
+          try{
+            const found=await this._barcodeDetector.detect(c);
+            const hit=(found||[]).find(x=>x?.rawValue);
+            if(hit)code=String(hit.rawValue).replace(/\D/g,'');
+          }catch(e){}
+        }
+        if(!code&&this._decoderMode==='native'&&this._decoderMisses%4===0){
+          try{code=decodeEANFromImageData(ctx.getImageData(0,0,c.width,c.height));}catch(e){}
+        }
+        if(code)this._decoderMisses=0;
       }
     }catch(e){
       console.debug('AH Shopping scan frame error',e);
@@ -737,12 +815,11 @@ class AhShoppingCard extends HTMLElement {
     const old=p.is_bonus&&p.price_was>p.price_now?`<s>${this._money(p.price_was)}</s> `:'';
     const price=p.price_now?`<span class="price">${old}${this._money(p.price_now)}</span>`:'';
     const bonus=p.is_bonus?`<span class="bonus">BONUS · ${this._esc(p.bonus_mechanism||'Aanbieding')}</span>`:'';
-    const image=p.image_url?`<img src="${this._esc(p.image_url)}" alt="">`:'<div class="ph">🛒</div>';
     const meta=[price,bonus].filter(Boolean).join('');
     const controls=Number(p.id||0)>0
       ? `<div class="qty compactQty">${qty>0?`<button data-scan-minus data-pid="${p.id}" aria-label="Verlaag aantal">−</button>`:''}<span>${qty}</span><button data-scan-plus data-pid="${p.id}" aria-label="Voeg toe">+</button></div>`
       : `<div class="qty readonlyQty"><span>${qty}×</span></div>`;
-    return `<div class="item compactItem scanOverlayItem" style="opacity:${opacity}">${image}<div class="info"><b>${this._esc(p.title||p.barcode||'Product')}</b><div class="compactMeta">${meta}</div></div>${controls}</div>`;
+    return this._productRow(p,{controls,compact:true,rowClass:'scanOverlayItem',style:`opacity:${opacity}`,metaHtml:meta});
   }
 
   _adjustScanQuantity(pid,delta){
@@ -779,6 +856,7 @@ class AhShoppingCard extends HTMLElement {
     clearTimeout(this._scanLoop);
     this._scanLoop=null;
     this._scanBusy=false;
+    this._decoderMisses=0;
     try{this._zxingReader?.reset?.();}catch(e){}
     this._zxingReader=null;
     this._zxingTask=null;
@@ -807,24 +885,59 @@ class AhShoppingCard extends HTMLElement {
     this._scanProcessing=false;
     this._heldBarcode='';
     this._scanInlineActive=false;
+    this._scannerRoute='';
     this._render();
+  }
+
+  _routeKey(){
+    return `${window.location.pathname}${window.location.search}`;
+  }
+
+  _clearScanSession(){
+    this._scanRecent=[];
+    this._scanProduct=null;
+    this._scanQueue=[];
+    this._scanProcessing=false;
+    this._heldBarcode='';
+    this._heldBarcodeLastSeen=0;
+    this._decoderMisses=0;
+    this._renderScanResult();
+  }
+
+  _handleLocationChange(){
+    const current=this._routeKey();
+    if(this._scannerRoute&&current!==this._scannerRoute){
+      if(this._stream)this._stopCamera();
+      this._clearScanSession();
+      this._setScanStatus('Camera gepauzeerd');
+    }
+    this._syncScannerVisibility();
   }
 
   _shouldScannerRun(){
     if(!this._scanner||!this.isConnected)return false;
     if(!(this._config.scanner_mode==='permanent'||this._scanInlineActive))return false;
     if(document.visibilityState!=='visible')return false;
-    if(this._visibilityObserver&& !this._intersecting)return false;
+    if(this._visibilityObserver&&!this._intersecting)return false;
+    if(this._scannerRoute&&this._routeKey()!==this._scannerRoute)return false;
     const rect=this.getBoundingClientRect();
     if(rect.width<2||rect.height<2)return false;
     const style=getComputedStyle(this);
-    return style.display!=='none'&&style.visibility!=='hidden';
+    return style.display!=='none'&&style.visibility!=='hidden'&&style.opacity!=='0';
   }
 
   async _syncScannerVisibility(){
     if(!this._scanner){
       this._scanner=this.shadowRoot?.querySelector('#inlineScanner')||null;
     }
+
+    // Permanent cards bind to the dashboard route only when they are genuinely visible.
+    if(!this._scannerRoute&&this._scanner&&document.visibilityState==='visible'&&
+      (!this._visibilityObserver||this._intersecting)){
+      const rect=this.getBoundingClientRect();
+      if(rect.width>=2&&rect.height>=2)this._scannerRoute=this._routeKey();
+    }
+
     const shouldRun=this._shouldScannerRun();
     if(!shouldRun){
       if(this._stream)this._stopCamera();
@@ -873,6 +986,8 @@ class AhShoppingCard extends HTMLElement {
     this._intersecting=false;
     this._stopCamera();
     this._scanner=null;
+    this._scannerRoute='';
+    this._clearScanSession();
   }
 
   _css(){return `:host{display:block;height:100%;min-height:0;overflow:hidden}ha-card{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}.fullCard{height:100%;min-height:0;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:18px 18px 12px}.headLeft{min-width:0;flex:1 1 auto}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{flex:0 0 auto;text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400;white-space:nowrap}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.combinedBreakdown{font-size:10px;color:var(--secondary-text-color);white-space:nowrap}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.combinedQty span{font-size:13px;font-weight:700;min-width:22px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.inlineScanner{position:relative;flex:1 1 0;min-height:0;width:100%;overflow:hidden;background:#000}.inlineScanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transform-origin:center center;will-change:transform}.scanGuide{position:absolute;z-index:2;left:20%;right:20%;top:40%;height:20%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}.scanGuide:after{content:'';position:absolute;left:7%;right:7%;top:50%;height:2px;background:#f33}.scanRecent{position:absolute;z-index:4;top:10px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px;max-height:78%;overflow:hidden;pointer-events:none}.scanRecent.withClose{right:58px}.scanOverlayItem{pointer-events:auto;background:var(--card-background-color);border:0!important;border-radius:10px;box-shadow:0 2px 10px #0005;animation:scanRowIn .18s ease-out}.scanOverlayItem .compactMeta{min-height:14px}.scanOverlayItem .qty button{background:var(--secondary-background-color)}.scanClose{position:absolute;z-index:6;top:10px;right:10px;width:38px;height:38px;padding:0;border-radius:50%;background:#0009;color:#fff;font-size:24px;line-height:38px;backdrop-filter:blur(4px)}.scanHud{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;pointer-events:none}.scanPill{display:inline-block;max-width:70%;padding:5px 8px;border-radius:999px;background:#0009;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px)}.scanPill.error{background:var(--error-color,#c62828)}.inlineScanner.scanHit:after{content:'';position:absolute;z-index:3;inset:0;border:3px solid #00a03c;box-shadow:inset 0 0 28px #00a03c88;pointer-events:none;animation:scanFlash .22s ease-out}@keyframes scanFlash{from{opacity:1}to{opacity:0}}@keyframes scanRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0)}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.scanOverlayItem{grid-template-columns:42px minmax(0,1fr) auto}.scanOverlayItem .qty{grid-column:auto;justify-content:flex-end}.scanOverlayItem img,.scanOverlayItem .ph{width:38px;height:38px}.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
