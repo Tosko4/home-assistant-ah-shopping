@@ -615,11 +615,12 @@ class AhShoppingCard extends HTMLElement {
     const result=this._scanner?.querySelector('#scanresult');
     const p=this._scanProduct;
     if(!result||!p)return;
-    const qty=Math.max(1,Number(p.quantity_on_list||1));
+    const qty=Math.max(0,Number(p.quantity_on_list??0));
     const old=p.price_was>p.price_now?`<s>${this._money(p.price_was)}</s> `:'';
     const bonus=p.is_bonus?`<div class="scanBonus">BONUS · ${this._esc(p.bonus_mechanism||'Aanbieding')}</div>`:'';
     const image=p.image_url?`<img src="${this._esc(p.image_url)}" alt="">`:'<div class="scanPh">🛒</div>';
-    result.innerHTML=`<div class="scanResultTitle"><span class="scanSuccess">✓ Gescand</span></div><div class="scanListItem">${image}<div class="scanProductInfo"><b>${this._esc(p.title||p.barcode||'Product')}</b><small>${this._esc(p.unit_size||'')}</small><div class="scanPrice">${old}${this._money(p.price_now)}</div>${bonus}</div><div class="scanQty"><button id="scanMinus">−</button><strong>${qty}</strong><button id="scanPlus">+</button></div></div><small class="scanHint">Blijf scannen; dezelfde barcode eerst kort uit beeld halen.</small>`;
+    const removed=qty===0;
+    result.innerHTML=`<div class="scanResultTitle"><span class="scanSuccess">${removed?'Verwijderd':'✓ Gescand'}</span></div><div class="scanListItem">${image}<div class="scanProductInfo"><b>${this._esc(p.title||p.barcode||'Product')}</b><small>${this._esc(p.unit_size||'')}</small><div class="scanPrice">${old}${this._money(p.price_now)}</div>${bonus}</div><div class="scanQty">${qty>0?'<button id="scanMinus" aria-label="Verlaag aantal">−</button>':''}<strong>${qty}</strong><button id="scanPlus" aria-label="Voeg toe">+</button></div></div><small class="scanHint">${removed?'Product is uit het winkelmandje verwijderd. Met + voeg je het opnieuw toe.':'Blijf scannen; dezelfde barcode eerst kort uit beeld halen.'}</small>`;
     result.querySelector('#scanMinus')?.addEventListener('click',()=>this._adjustScanQuantity(-1));
     result.querySelector('#scanPlus')?.addEventListener('click',()=>this._adjustScanQuantity(1));
   }
@@ -627,7 +628,7 @@ class AhShoppingCard extends HTMLElement {
   _adjustScanQuantity(delta){
     const p=this._scanProduct;
     if(!p?.id)return;
-    const next=Math.max(1,Number(p.quantity_on_list||1)+delta);
+    const next=Math.max(0,Number(p.quantity_on_list??0)+delta);
     p.quantity_on_list=next;
     this._scanPendingQty.set(Number(p.id),next);
     this._renderScanResult();
