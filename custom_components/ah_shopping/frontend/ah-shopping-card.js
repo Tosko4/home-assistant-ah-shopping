@@ -1,7 +1,7 @@
 import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._busy=false; this._refreshing=false; this._scanner=null; this._scanLoop=null; this._scanSessionTimer=null; this._scanCountdownTimer=null; this._scanDeadline=0; this._facing='user'; this._message=''; this._query=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._zxingTask=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
@@ -363,30 +363,6 @@ class AhShoppingCard extends HTMLElement {
     this._scannerRoute=this._routeKey();
     this._scanInlineActive=true;
     this._render();
-  }
-
-  _armScannerTimeout(ms){
-    clearTimeout(this._scanSessionTimer);
-    clearInterval(this._scanCountdownTimer);
-    this._scanDeadline=Date.now()+ms;
-    this._updateScanCountdown();
-    this._scanCountdownTimer=setInterval(()=>this._updateScanCountdown(),250);
-    this._scanSessionTimer=setTimeout(()=>{
-      if(this._scanProcessing||this._scanQueue.length){
-        this._armScannerTimeout(1000);
-        return;
-      }
-      this._closeScanner();
-    },ms);
-  }
-
-  _updateScanCountdown(){
-    const el=this._scanner?.querySelector('#scanCountdown');
-    if(!el||!this._scanDeadline)return;
-    const seconds=Math.max(0,Math.ceil((this._scanDeadline-Date.now())/1000));
-    const minutes=Math.floor(seconds/60);
-    const rest=String(seconds%60).padStart(2,'0');
-    el.textContent=`Auto sluiten · ${minutes}:${rest}`;
   }
 
   _armScanAudio(){
@@ -864,7 +840,6 @@ class AhShoppingCard extends HTMLElement {
     this._decoderMisses=0;
     try{this._zxingReader?.reset?.();}catch(e){}
     this._zxingReader=null;
-    this._zxingTask=null;
     if(this._stream){
       this._stream.getTracks().forEach(t=>t.stop());
       this._stream=null;
@@ -877,11 +852,6 @@ class AhShoppingCard extends HTMLElement {
 
   _closeScanner(){
     if(this._config.scanner_mode==='permanent')return;
-    clearTimeout(this._scanSessionTimer);
-    clearInterval(this._scanCountdownTimer);
-    this._scanSessionTimer=null;
-    this._scanCountdownTimer=null;
-    this._scanDeadline=0;
     this._scanQueue=[];
     this._stopCamera();
     this._scanner=null;
