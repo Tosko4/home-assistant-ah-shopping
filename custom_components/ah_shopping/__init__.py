@@ -22,6 +22,11 @@ type AhShoppingConfigEntry = ConfigEntry[AhShoppingRuntimeData]
 async def _async_reload_entry(hass: HomeAssistant, entry: AhShoppingConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Register the dashboard module before config entries render Lovelace cards."""
+    await async_register_frontend(hass)
+    return True
+
 async def async_setup_entry(hass:HomeAssistant,entry:AhShoppingConfigEntry)->bool:
     async def save_tokens(token_data:dict[str,Any])->None:
         hass.config_entries.async_update_entry(entry,data={**entry.data,**token_data})
