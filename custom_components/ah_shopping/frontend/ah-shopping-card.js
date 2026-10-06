@@ -42,7 +42,7 @@ function decodeEANFromImageData(imageData){
 }
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._autoScannerRoute=''; this._autoVisitArmed=true; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._scanBandCanvas=null; this._scanStatusTimer=null; this._isAndroid=/Android/i.test(navigator.userAgent||''); window.__ahShoppingScanOrder=window.__ahShoppingScanOrder||{seq:0,products:new Map()}; this._scanOrderState=window.__ahShoppingScanOrder; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._scanVideoFrame=null; this._scanAnimationFrame=null; this._decodeWorker=null; this._workerPending=null; this._scanGeneration=0; this._scanCooldownUntil=0; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._autoScannerRoute=''; this._autoVisitArmed=true; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._scanBandCanvas=null; this._scanStatusTimer=null; this._isAndroid=/Android/i.test(navigator.userAgent||''); window.__ahShoppingScanOrder=window.__ahShoppingScanOrder||{seq:0,products:new Map()}; this._scanOrderState=window.__ahShoppingScanOrder; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2,scan_decoder:'auto'};}
   static getConfigForm(){return {schema:[
     {name:'title',selector:{text:{}}},
@@ -61,7 +61,8 @@ class AhShoppingCard extends HTMLElement {
     {name:'scan_zoom',selector:{number:{min:1,max:4,step:0.25,mode:'slider'}}},
     {name:'scan_decoder',selector:{select:{options:[
       {value:'auto',label:'Auto (recommended)'},
-      {value:'zxing',label:'ZXing'},
+      {value:'wasm',label:'ZXing-C++ (WebAssembly)'},
+      {value:'zxing',label:'ZXing (legacy)'},
       {value:'native',label:'Native BarcodeDetector'},
       {value:'local',label:'Local EAN'}
     ]}}},
@@ -655,6 +656,7 @@ class AhShoppingCard extends HTMLElement {
   async _startCamera(){
     if(!this._scanner||!this._shouldScannerRun())return;
     this._stopCamera();
+    const generation=this._scanGeneration;
     this._scanCount=0;
     this._scanBusy=false;
     const video=this._scanner.querySelector('video');
@@ -677,6 +679,7 @@ class AhShoppingCard extends HTMLElement {
       this._stream=stream;
       const track=stream.getVideoTracks()[0];
       await this._tuneCameraTrack(track);
+      if(generation!==this._scanGeneration)return;
 
       video.srcObject=stream;
       video.style.transform=`scale(${this._digitalZoom})`;
@@ -685,6 +688,7 @@ class AhShoppingCard extends HTMLElement {
       this._scanCanvas=document.createElement('canvas');
       this._scanBandCanvas=document.createElement('canvas');
       await this._initScannerEngine();
+      if(generation!==this._scanGeneration){this._stopWasmWorker();return;}
       this._setScanStatus('');
       this._scheduleScan();
     }catch(e){
@@ -797,6 +801,19 @@ class AhShoppingCard extends HTMLElement {
       return false;
     };
 
+    if(selected==='auto'||selected==='wasm'){
+      try{
+        await this._initWasmWorker();
+        if(selected==='auto')await tryNative();
+        this._decoderMode='wasm';
+        return;
+      }catch(error){
+        this._stopWasmWorker();
+        if(selected==='wasm')throw error;
+        console.warn('AH Shopping: WASM unavailable, trying other decoders',error);
+      }
+    }
+
     if(selected==='local'){
       this._decoderMode='local';
       return;
@@ -845,7 +862,65 @@ class AhShoppingCard extends HTMLElement {
     await window.__ahShoppingZXingPromise;
   }
 
-  _scheduleScan(){clearTimeout(this._scanLoop);this._scanLoop=setTimeout(()=>this._scanFrame(),90);}
+  _scheduleScan(){
+    this._cancelScheduledScan();
+    if(!this._scanner||!this._stream)return;
+    const video=this._scanner.querySelector('video');
+    const remaining=this._scanCooldownUntil-Date.now();
+    if(remaining>0){
+      this._scanLoop=setTimeout(()=>this._scheduleScan(),remaining);
+    }else if(video?.requestVideoFrameCallback){
+      this._scanVideoFrame=video.requestVideoFrameCallback(()=>{this._scanVideoFrame=null;this._scanFrame();});
+    }else{
+      this._scanAnimationFrame=requestAnimationFrame(()=>{this._scanAnimationFrame=null;this._scanFrame();});
+    }
+  }
+
+  _cancelScheduledScan(){
+    clearTimeout(this._scanLoop);this._scanLoop=null;
+    if(this._scanVideoFrame!=null)this._scanner?.querySelector('video')?.cancelVideoFrameCallback?.(this._scanVideoFrame);
+    this._scanVideoFrame=null;
+    if(this._scanAnimationFrame!=null)cancelAnimationFrame(this._scanAnimationFrame);
+    this._scanAnimationFrame=null;
+  }
+
+  _stopWasmWorker(){
+    this._decodeWorker?.terminate();this._decodeWorker=null;
+    if(this._workerPending){this._workerPending.reject(new Error('Scanner stopped'));this._workerPending=null;}
+  }
+
+  async _initWasmWorker(){
+    this._stopWasmWorker();
+    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.21');
+    this._decodeWorker=worker;
+    await new Promise((resolve,reject)=>{
+      const timeout=setTimeout(()=>reject(new Error('Barcode decoder could not be loaded')),10000);
+      worker.onmessage=event=>{
+        clearTimeout(timeout);
+        if(event.data.ready)resolve();else reject(new Error(event.data.error||'Barcode decoder startup failed'));
+      };
+      worker.onerror=event=>{clearTimeout(timeout);reject(new Error(event.message||'Barcode worker failed'));};
+    });
+    worker.onmessage=event=>{
+      const pending=this._workerPending;
+      if(!pending||event.data.id!==pending.id)return;
+      this._workerPending=null;
+      if(event.data.error)pending.reject(new Error(event.data.error));else pending.resolve(event.data.code||'');
+    };
+    worker.onerror=event=>{
+      const pending=this._workerPending;this._workerPending=null;
+      pending?.reject(new Error(event.message||'Barcode worker failed'));
+    };
+  }
+
+  _decodeWasm(image,harder){
+    return new Promise((resolve,reject)=>{
+      if(!this._decodeWorker){reject(new Error('Barcode worker unavailable'));return;}
+      const id=this._scanCount;
+      this._workerPending={id,resolve,reject};
+      this._decodeWorker.postMessage({id,width:image.width,height:image.height,pixels:image.data.buffer,harder},[image.data.buffer]);
+    });
+  }
 
   _scanSourceRect(video){
     const vw=video.videoWidth,vh=video.videoHeight;
@@ -909,19 +984,30 @@ class AhShoppingCard extends HTMLElement {
     const video=this._scanner.querySelector('video');
     if(video.readyState<2||!video.videoWidth){this._scheduleScan();return;}
 
+    const generation=this._scanGeneration;
     this._scanBusy=true;
     this._scanCount++;
     let code=null;
 
     try{
       const c=this._scanCanvas,ctx=c.getContext('2d',{willReadFrequently:true});
-      const {sx,sy,sw,sh}=this._scanSourceRect(video);
-      const targetWidth=Math.min(800,sw);
-      c.width=Math.max(320,targetWidth);
-      c.height=Math.max(120,Math.floor(sh*c.width/sw));
+      const expand=this._decoderMisses>=2&&this._scanCount%2===0;
+      const {sx,sy,sw,sh}=expand
+        ? {sx:0,sy:0,sw:video.videoWidth,sh:video.videoHeight}
+        : this._scanSourceRect(video);
+      const targetWidth=Math.min(expand?1280:1200,sw);
+      c.width=Math.max(1,targetWidth);
+      c.height=Math.max(1,Math.floor(sh*c.width/sw));
       ctx.drawImage(video,sx,sy,sw,sh,0,0,c.width,c.height);
 
-      if(this._decoderMode==='zxing'&&this._zxingReader?.decodeFromCanvas){
+      if(this._decoderMode==='wasm'){
+        // Native detection can return quickly; C++ handles difficult frames.
+        if(this._barcodeDetector){
+          try{const hits=await this._barcodeDetector.detect(c);code=hits?.[0]?.rawValue||'';}catch(e){}
+        }
+        if(!code)code=await this._decodeWasm(ctx.getImageData(0,0,c.width,c.height),this._decoderMisses>=2);
+        code=String(code||'').replace(/\D/g,'');
+      }else if(this._decoderMode==='zxing'&&this._zxingReader?.decodeFromCanvas){
         try{
           const result=this._zxingReader.decodeFromCanvas(c);
           const raw=typeof result?.getText==='function'?result.getText():result?.text;
@@ -989,8 +1075,9 @@ class AhShoppingCard extends HTMLElement {
       console.debug('AH Shopping scan frame error',e);
     }
 
+    if(generation!==this._scanGeneration)return;
     if(code&&(/^\d{8}$/.test(code)||/^\d{12,14}$/.test(code))&&
-      (code.length===12||code.length===14||checksumOk(code))){
+      checksumOk(code)){
       this._barcodeDetected(code);
     }else{
       this._noteBarcodeAbsent();
@@ -1033,6 +1120,9 @@ class AhShoppingCard extends HTMLElement {
         this._promoteScannedProduct(p.id);
         this._scanProduct=p;
         this._pushRecentProduct(p);
+        this._scanCooldownUntil=Date.now()+350;
+        // Restart scheduling so an already scheduled frame observes cooldown.
+        this._scheduleScan();
         this._playScanBeep();
         if(navigator.vibrate)navigator.vibrate(70);
         this._pulseScanner();
@@ -1133,6 +1223,10 @@ class AhShoppingCard extends HTMLElement {
   }
 
   _stopCamera(clear=true){
+    this._scanGeneration++;
+    this._scanCooldownUntil=0;
+    this._cancelScheduledScan();
+    this._stopWasmWorker();
     clearTimeout(this._scanLoop);
     this._scanLoop=null;
     this._scanBusy=false;
