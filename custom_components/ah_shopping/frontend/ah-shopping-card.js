@@ -45,7 +45,6 @@ class AhShoppingCard extends HTMLElement {
   constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._scanBandCanvas=null; this._scanStatusTimer=null; this._isAndroid=/Android/i.test(navigator.userAgent||''); window.__ahShoppingScanOrder=window.__ahShoppingScanOrder||{seq:0,products:new Map()}; this._scanOrderState=window.__ahShoppingScanOrder; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2};}
   static getConfigForm(){return {schema:[
-    {name:'entity',selector:{entity:{domain:'sensor'}}},
     {name:'title',selector:{text:{}}},
     {name:'show_header',selector:{boolean:{}}},
     {name:'show_scan',selector:{boolean:{}}},
@@ -110,7 +109,11 @@ class AhShoppingCard extends HTMLElement {
     this._hass=hass;
     const entities=[this._entity(),this._orderEntity()].filter(Boolean);
     const sig=entities.map(e=>`${e.entity_id}|${e.last_updated}`).join(';')||'none';
-    if(sig!==this._lastEntitySig){this._lastEntitySig=sig;if(!this._scanner)this._render();}
+    if(sig!==this._lastEntitySig){
+      this._lastEntitySig=sig;
+      if(this._scanner)this._updateHeaderOnly();
+      else this._render();
+    }
   }
   getCardSize(){
     if(this._config.show_products===false&&this._config.show_header===false)return 1;
@@ -126,7 +129,14 @@ class AhShoppingCard extends HTMLElement {
       min_rows:compact?1:2
     };
   }
-  _entity(){if(!this._hass)return null;if(this._config.entity&&this._hass.states[this._config.entity])return this._hass.states[this._config.entity];return Object.values(this._hass.states).find(s=>s.attributes?.ah_shopping_list===true)||null;}
+  _entity(){
+    if(!this._hass)return null;
+    if(this._config.entity){
+      const selected=this._hass.states[this._config.entity];
+      if(selected?.attributes?.ah_shopping_list===true)return selected;
+    }
+    return Object.values(this._hass.states).find(s=>s.attributes?.ah_shopping_list===true)||null;
+  }
   _orderEntity(){if(!this._hass)return null;return Object.values(this._hass.states).find(s=>s.attributes?.ah_next_order===true)||null;}
   _stableItemKey(item,scope){
     const productId=Number(item?.product_id||0);
@@ -329,24 +339,10 @@ class AhShoppingCard extends HTMLElement {
     list.addEventListener('scroll',()=>{this._listScrollTop=list.scrollTop;},{passive:true});
   }
 
-  _render(){
-    if(!this.shadowRoot)return;
-
-    if(this._stream)this._stopCamera();
-
-    this._captureListScroll();
-
+  _headerValues(){
     const view=this._viewData();
-    const entity=view.entity;
     const items=view.items||[];
     const title=this._config.title||view.label;
-    const showHeader=this._config.show_header!==false;
-    const showScan=this._config.show_scan!==false;
-    const showProducts=this._config.show_products!==false;
-    const permanent=this._config.scanner_mode==='permanent';
-    const scannerActive=permanent||this._scanInlineActive;
-    const scanLabel=this._config.scan_label||'Scan product';
-    const cardClass='fullCard';
     const syncText=view.pending_changes? ` · ${view.pending_changes} wijziging${view.pending_changes===1?'':'en'} bezig` : '';
     const articleCount=Number(view.unique_items??items.length);
     const articleText=`${articleCount} ${articleCount===1?'artikel':'artikelen'}`;
@@ -354,9 +350,42 @@ class AhShoppingCard extends HTMLElement {
       ? `${view.delivery}${view.time?` · ${view.time}`:''}${syncText}`
       : `${view.total_quantity??0} stuks${syncText}`;
     const totalMeta=[view.bonus_savings? `Bonus −${this._money(view.bonus_savings)}`:'',articleText].filter(Boolean).join(' · ');
+    return {view,title,leftNote,totalMeta,total:this._money(view.total_price||0)};
+  }
+
+  _updateHeaderOnly(){
+    if(this._config.show_header===false||!this.shadowRoot)return;
+    const {title,leftNote,totalMeta,total}=this._headerValues();
+    const titleEl=this.shadowRoot.querySelector('.head .title');
+    const totalEl=this.shadowRoot.querySelector('.head .total');
+    const subEl=this.shadowRoot.querySelector('.head .headerSub');
+    const metaEl=this.shadowRoot.querySelector('.head .headerMeta');
+    if(titleEl)titleEl.textContent=title;
+    if(totalEl)totalEl.textContent=total;
+    if(subEl)subEl.textContent=leftNote;
+    if(metaEl)metaEl.textContent=totalMeta;
+  }
+
+  _render(){
+    if(!this.shadowRoot)return;
+
+    if(this._stream)this._stopCamera();
+
+    this._captureListScroll();
+
+    const {view,title,leftNote,totalMeta,total}=this._headerValues();
+    const entity=view.entity;
+    const items=view.items||[];
+    const showHeader=this._config.show_header!==false;
+    const showScan=this._config.show_scan!==false;
+    const showProducts=this._config.show_products!==false;
+    const permanent=this._config.scanner_mode==='permanent';
+    const scannerActive=permanent||this._scanInlineActive;
+    const scanLabel=this._config.scan_label||'Scan product';
+    const cardClass='fullCard';
 
     const header=showHeader
-      ? `<div class="head"><div class="title">${this._esc(title)}</div><div class="total">${this._money(view.total_price||0)}</div><div class="sub headerSub">${this._esc(leftNote)}</div><div class="headerMeta">${this._esc(totalMeta)}</div></div>`
+      ? `<div class="head"><div class="title">${this._esc(title)}</div><div class="total">${this._esc(total)}</div><div class="sub headerSub">${this._esc(leftNote)}</div><div class="headerMeta">${this._esc(totalMeta)}</div></div>`
       : '';
     const scan=showScan&&!scannerActive
       ? `<div class="scanArea"><ha-button id="scan" class="scanWide" appearance="filled"><ha-icon icon="mdi:barcode-scan" slot="start"></ha-icon>${this._esc(scanLabel)}</ha-button></div>`
