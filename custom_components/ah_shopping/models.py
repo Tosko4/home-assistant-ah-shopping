@@ -318,7 +318,11 @@ class NextOrderData:
     order_id: int = 0
     status: str = ""
     shopping_type: str = ""
+    transaction_completed: bool = False
+    reopenable: bool = False
     modifiable: bool = False
+    is_after_cut_off: bool = False
+    closing_date_time: str = ""
     delivery_method: str = ""
     delivery_date: str = ""
     delivery_date_display: str = ""
@@ -341,7 +345,11 @@ class NextOrderData:
             "order_id": self.order_id,
             "status": self.status,
             "shopping_type": self.shopping_type,
+            "transaction_completed": self.transaction_completed,
+            "reopenable": self.reopenable,
             "modifiable": self.modifiable,
+            "is_after_cut_off": self.is_after_cut_off,
+            "closing_date_time": self.closing_date_time,
             "delivery_method": self.delivery_method,
             "delivery_date": self.delivery_date,
             "delivery_date_display": self.delivery_date_display,
