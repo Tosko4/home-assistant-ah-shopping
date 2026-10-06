@@ -34,6 +34,37 @@ const path=require('node:path');
  },source);
  for(const [key,value] of Object.entries(result))assert.equal(value,true,`${source}: ${key}`);
  }
+ const lifecycle=await page.evaluate(async()=>{
+  document.querySelector('ah-shopping-card')?.remove();
+  const errors=[];window.addEventListener('error',e=>errors.push(e.message));
+  const card=document.createElement('ah-shopping-card');
+  let route='/dashboard/shopping',starts=0;
+  card._routeKey=()=>route;
+  card._startCamera=async()=>{starts++;card._stream={getTracks:()=>[{stop(){}}]};};
+  card.setConfig({scanner_mode:'button_auto'});
+  document.body.append(card);
+  const settle=()=>new Promise(r=>setTimeout(r,100));
+  await settle();const initial=starts===1&&card._scanInlineActive;
+  card._closeScanner();await card._syncScannerVisibility();
+  const staysClosed=starts===1&&!card._scanInlineActive;
+  route='/dashboard/other';card.style.display='none';
+  window.dispatchEvent(new Event('location-changed'));await settle();
+  const away=starts===1&&!card._stream;
+  route='/dashboard/shopping';card.style.display='';
+  window.dispatchEvent(new Event('location-changed'));await settle();
+  const revisit=starts===2&&card._scanInlineActive;
+  card._closeScanner();card.remove();document.body.append(card);await settle();
+  const reconnect=starts===3&&card._scanInlineActive;
+  card._closeScanner();
+  card._entity=()=>({attributes:{items:[],estimated_total:12,bonus_savings:3}});
+  card._orderEntity=()=>({attributes:{items:[],estimated_product_total:10,bonus_savings:2,bonus_savings_estimated:true}});
+  card._config.product_source='shopping_list_and_order';
+  card._render();
+  const noApprox=!card.shadowRoot.querySelector('.head').textContent.includes('≈');
+  card.remove();return {initial,staysClosed,away,revisit,reconnect,noApprox,noErrors:errors.length===0};
+ });
+ for(const [key,value] of Object.entries(lifecycle))assert.equal(value,true,`scanner lifecycle: ${key}`);
+ console.log('PASS: scanner initial visit, route return, reconnect, closed-session stability and exact header text');
  console.log('PASS: retained list/row/button nodes, scroll, focus and reordered delayed refreshes in all three views');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -42,7 +42,7 @@ function decodeEANFromImageData(imageData){
 }
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._scanBandCanvas=null; this._scanStatusTimer=null; this._isAndroid=/Android/i.test(navigator.userAgent||''); window.__ahShoppingScanOrder=window.__ahShoppingScanOrder||{seq:0,products:new Map()}; this._scanOrderState=window.__ahShoppingScanOrder; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._autoScannerRoute=''; this._autoVisitArmed=true; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._scanBandCanvas=null; this._scanStatusTimer=null; this._isAndroid=/Android/i.test(navigator.userAgent||''); window.__ahShoppingScanOrder=window.__ahShoppingScanOrder||{seq:0,products:new Map()}; this._scanOrderState=window.__ahShoppingScanOrder; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2,scan_decoder:'auto'};}
   static getConfigForm(){return {schema:[
     {name:'title',selector:{text:{}}},
@@ -97,6 +97,10 @@ class AhShoppingCard extends HTMLElement {
       ...cleanConfig,
       ...(legacySource?{product_source:legacySource}:{})
     };
+    if(previousMode!==this._config.scanner_mode){
+      this._autoScannerRoute='';
+      this._autoVisitArmed=true;
+    }
     this._config.scan_zoom=Math.min(4,Math.max(1,Number(this._config.scan_zoom||2)));
     this._facing=this._config.scan_camera==='rear'?'environment':'user';
 
@@ -396,8 +400,8 @@ class AhShoppingCard extends HTMLElement {
     const leftNote=view.delivery
       ? `${view.delivery}${view.time?` · ${view.time}`:''}${syncText}`
       : `${view.total_quantity??0} stuks${syncText}`;
-    const totalMeta=[view.bonus_savings? `Bonus ${view.bonus_savings_estimated?'≈ ':''}−${this._money(view.bonus_savings)}`:'',articleText].filter(Boolean).join(' · ');
-    return {view,title,leftNote,totalMeta,total:`${view.total_estimated?'≈ ':''}${this._money(view.total_price||0)}`};
+    const totalMeta=[view.bonus_savings? `Bonus −${this._money(view.bonus_savings)}`:'',articleText].filter(Boolean).join(' · ');
+    return {view,title,leftNote,totalMeta,total:this._money(view.total_price||0)};
   }
 
   _updateHeaderOnly(){
@@ -1178,6 +1182,10 @@ class AhShoppingCard extends HTMLElement {
 
   _handleLocationChange(){
     const current=this._routeKey();
+    if(this._config.scanner_mode==='button_auto'&&this._autoScannerRoute&&current!==this._autoScannerRoute){
+      this._autoVisitArmed=true;
+      if(this._scanInlineActive)this._closeScanner();
+    }
     if(this._scannerRoute&&current!==this._scannerRoute){
       if(this._stream)this._stopCamera();
       this._clearScanSession();
@@ -1199,6 +1207,24 @@ class AhShoppingCard extends HTMLElement {
   }
 
   async _syncScannerVisibility(){
+    // Re-arm on dashboard navigation/reconnection, not on polling or scrolling.
+    if(this._config.scanner_mode==='button_auto'&&this.isConnected&&
+      document.visibilityState==='visible'&&(!this._visibilityObserver||this._intersecting)){
+      const rect=this.getBoundingClientRect();
+      const style=getComputedStyle(this);
+      if(rect.width>=2&&rect.height>=2&&style.display!=='none'&&style.visibility!=='hidden'&&style.opacity!=='0'){
+        const route=this._routeKey();
+        if(!this._autoScannerRoute)this._autoScannerRoute=route;
+        if(this._autoScannerRoute===route&&this._autoVisitArmed){
+          this._autoVisitArmed=false;
+          this._scanInlineActive=true;
+          this._scannerRoute=route;
+          this._clearScannerTimer();
+          this._clearScanSession();
+          this._render();
+        }
+      }
+    }
     if(!this._scanner){
       this._scanner=this.shadowRoot?.querySelector('#inlineScanner')||null;
     }
@@ -1251,6 +1277,7 @@ class AhShoppingCard extends HTMLElement {
   }
 
   disconnectedCallback(){
+    this._autoVisitArmed=true;
     this._clearScannerTimer();
     document.removeEventListener('visibilitychange',this._visibilityHandler);
     window.removeEventListener('location-changed',this._locationHandler);

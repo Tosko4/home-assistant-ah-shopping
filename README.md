@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.17
+## 0.2.18
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -438,3 +438,9 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Includes discounts already embedded in unit prices in displayed savings without subtracting them twice.
 - Adds `estimated_product_total` and `total_price_difference` to the order entity; retains the original AH `total_price`. Order views display the estimated product total with an ≈ marker, excluding unexplained differences in AH's order amount. Delivery charges, deposits and unsupported or mix-and-match promotions may differ from the amount payable.
 - Regression fixture matches the supplied 29-product example: €59.78 product total, €21.87 savings, €0.25 difference from the €60.03 API order amount.
+
+### 0.2.18
+
+- Re-arms button-auto scanner mode on return to its dashboard route and when the card reconnects. Closing a scanner session stays effective for the current visit; entity updates and scrolling do not reopen it.
+- Removes approximation symbols from the total and Bonus text; the underlying product-total calculation is unchanged.
+- Adds browser coverage for automatic scanner lifecycle and rendering before entity data arrives.
