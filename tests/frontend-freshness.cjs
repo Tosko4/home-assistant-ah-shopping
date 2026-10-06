@@ -30,21 +30,25 @@ const server=http.createServer((req,res)=>{
    const first=calls.filter(n=>n==='refresh').length;
    document.dispatchEvent(new Event('visibilitychange'));card._syncListRefresh();
    const throttled=calls.filter(n=>n==='refresh').length;
-   card._lastListRefresh=Date.now()-LIST_REFRESH_MIN_MS-1;
+   window.__ahShoppingListRefresh.last=Date.now()-LIST_REFRESH_MIN_MS-1;
    document.dispatchEvent(new Event('visibilitychange'));
    const again=calls.filter(n=>n==='refresh').length;
    const timerWhileVisible=!!card._listRefreshTimer;
-   card.style.display='none';card._lastListRefresh=0;card._syncListRefresh();
+   card.style.display='none';window.__ahShoppingListRefresh.last=0;card._syncListRefresh();
    const hiddenCalls=calls.filter(n=>n==='refresh').length;const timerWhenHidden=!!card._listRefreshTimer;
-   card.style.display='block';
+   // A second list card on the same page shares the throttle.
+   card.style.display='block';card._syncListRefresh();const beforeTwin=calls.filter(n=>n==='refresh').length;
+   const twin=document.createElement('ah-shopping-card');twin.setConfig({});const twinCalls=[];twin._service=async n=>{twinCalls.push(n);return {};};
+   twin.hass=card._hass;twin.style.cssText='display:block;width:400px;height:200px';document.body.append(twin);
+   await new Promise(r=>setTimeout(r,300));const twinShared=twinCalls.length===0&&beforeTwin===3;twin.remove();
    const order=document.createElement('ah-shopping-card');order.setConfig({product_source:'next_order'});
    const orderCalls=[];order._service=async n=>{orderCalls.push(n);return {};};
    order.hass=card._hass;order.style.cssText='display:block;width:400px;height:200px';document.body.append(order);
    await new Promise(r=>setTimeout(r,300));
    card.remove();order.remove();
-   return {first,throttled,again,timerWhileVisible,hiddenCalls,timerWhenHidden,orderCalls:orderCalls.length,timerAfterRemove:!!card._listRefreshTimer};
+   return {first,throttled,again,timerWhileVisible,hiddenCalls,timerWhenHidden,twinShared,orderCalls:orderCalls.length,timerAfterRemove:!!card._listRefreshTimer};
   });
-  assert.deepEqual(refresh,{first:1,throttled:1,again:2,timerWhileVisible:true,hiddenCalls:2,timerWhenHidden:false,orderCalls:0,timerAfterRemove:false});
+  assert.deepEqual(refresh,{first:1,throttled:1,again:2,timerWhileVisible:true,hiddenCalls:2,timerWhenHidden:false,twinShared:true,orderCalls:0,timerAfterRemove:false});
 
   // 2. Without live camera support, Scan opens a photo picker and adds the decoded EAN.
   const photo=await page.evaluate(()=>{
@@ -86,6 +90,6 @@ const server=http.createServer((req,res)=>{
   await page.waitForFunction(()=>/Geen barcode gevonden/.test(window.photoCard._message),{timeout:15000});
   const after=await page.evaluate(()=>{const n=window.photoCalls.filter(c=>c[0]==='add_barcode').length;window.photoCard.remove();return {n,input:!!document.querySelector('input[type=file]')};});
   assert.deepEqual(after,{n:1,input:false});
-  console.log('PASS: visible-list refresh (throttled, hidden/next-order skipped) and HTTP photo-scan fallback');
+  console.log('PASS: visible-list refresh (page-wide throttle, hidden/next-order skipped) and HTTP photo-scan fallback');
  }finally{await browser.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
