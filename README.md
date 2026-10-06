@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.12
+## 0.2.13
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -380,3 +380,18 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Uses the same shared product-row renderer for the shopping list and scanner overlay to keep both layouts consistent.
 - Scanner overlay quantity controls can reduce a product all the way to **0**, removing it from Winkelmandje, with `+` available to add it again.
 - Keeps the shopping-list product order stable when quantities change and retains reliable internal/touch scrolling from 0.2.11.
+
+
+### 0.2.13
+
+- Restores the non-permanent scanner auto-close timer: 1:00 initially and 0:05 after a successful scan.
+- Keeps product-list scroll position anchored to the visible product while quantities update.
+- Expands the barcode guide to 90% of the camera width.
+- Removes always-visible scanner/zoom diagnostics; only actionable errors remain visible.
+- Shows the most recently scanned products first in Winkelmandje during the current dashboard session.
+- Registers the dashboard card earlier and makes its frontend bundle self-contained to reduce intermittent `Custom element doesn't exist` load races.
+- Aligns the card header into fixed rows so title/total and subtitle/meta line up consistently.
+- Uses the same compact product-row layout across Winkelmandje, Volgende bestelling, combined view and scanner overlay.
+- Improves desktop/laptop scanning by using ZXing as the primary decoder, requesting up to 1920×1080, retrying a central barcode band and sampling native detection more often.
+- Adds explicit scanner feedback when a barcode was decoded correctly but Albert Heijn has no matching product.
+- Keeps the permanent scanner header synchronized with live Home Assistant entity data instead of remaining at initial placeholder totals.
