@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.21
+## 0.2.22
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -465,3 +465,11 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Shows immediate barcode-read feedback while the AH lookup/add is in progress.
 - Worker and WASM assets are bundled with their licenses; the main scanning path does not require an external CDN. Legacy Auto fallback retains the existing decoders if worker initialization fails.
 - Browser tests cover local worker loading, standard/rotated/off-center EAN images, blank-image rejection, duplicate protection and immediate-frame/success-cooldown scheduling. Real-camera performance still depends on focus, lighting, motion blur and hardware.
+
+### 0.2.22
+
+- Runs Auto/WebAssembly scans directly through the C++ worker without waiting for browser BarcodeDetector initialization or detection. A stalled browser detector can no longer block that scan route.
+- Schedules each next attempt through requestAnimationFrame instead of depending on video-frame callbacks. No artificial retry delay; the successful-add cooldown remains 350 ms.
+- Bounds worker/native detection requests and recovers to Local EAN after a runtime decoder failure, with a visible error. Releases the busy flag even if read-feedback processing fails.
+- Shows the running card version, decoder and scan counter in the camera view to distinguish a stalled scan loop from unsuccessful recognition.
+- Extends browser tests to cover the complete crop/full-frame scan path, a stalled browser API, worker timeouts, error recovery and callback-independent scheduling.
