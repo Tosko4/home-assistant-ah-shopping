@@ -535,6 +535,8 @@ class AhShoppingCard extends HTMLElement {
     if(scannerActive){
       this._scanner=this.shadowRoot.querySelector('#inlineScanner');
       this.shadowRoot.querySelector('#scanClose')?.addEventListener('click',()=>this._closeScanner());
+      this.shadowRoot.querySelector('#scanAudio')?.addEventListener('click',()=>this._playScanBeep());
+      this._updateScanAudio();
       this._renderScanResult();
       requestAnimationFrame(()=>this._syncScannerVisibility());
     }else{
@@ -582,6 +584,7 @@ class AhShoppingCard extends HTMLElement {
       ${permanent?'':`<button id="scanClose" class="scanClose" aria-label="Sluit scanner">×</button>`}
       <div class="scanHud">
         <span id="scanstatus" class="scanPill scanStatus" hidden></span>
+        <button id="scanAudio" class="scanPill" style="pointer-events:auto" title="Schakel de scanpiep in en speel een testpiep">Geluid aan</button>
         ${permanent?'':`<span id="scanTimer" class="scanPill scanTimer">Auto sluiten · 1:00</span>`}
       </div>
     </div>`;
@@ -694,13 +697,28 @@ class AhShoppingCard extends HTMLElement {
   _armScanAudio(){
     try{
       const AudioCtx=window.AudioContext||window.webkitAudioContext;
-      if(!AudioCtx)return;
-      if(!this._audioContext)this._audioContext=new AudioCtx();
-      if(this._audioContext.state==='suspended')this._audioContext.resume();
-    }catch(e){}
+      if(!AudioCtx)return Promise.resolve(false);
+      if(!this._audioContext||this._audioContext.state==='closed'){
+        this._audioContext=new AudioCtx();
+        this._audioContext.onstatechange=()=>this._updateScanAudio();
+      }
+      this._updateScanAudio();
+      const ctx=this._audioContext;
+      const ready=ctx.state==='running'?Promise.resolve():ctx.resume();
+      return Promise.resolve(ready).then(()=>{this._updateScanAudio();return ctx.state==='running';}).catch(()=>false);
+    }catch(e){return Promise.resolve(false);}
+  }
+
+  _updateScanAudio(){
+    const button=this._scanner?.querySelector('#scanAudio');
+    if(button)button.hidden=this._audioContext?.state==='running';
   }
 
   _playScanBeep(){
+    const requested=Date.now();
+    return this._armScanAudio().then(ready=>{
+    // A blocked resume can resolve on a later gesture. Do not play an old scan.
+    if(!ready||Date.now()-requested>500)return;
     try{
       const ctx=this._audioContext;
       if(!ctx)return;
@@ -711,20 +729,22 @@ class AhShoppingCard extends HTMLElement {
       // Synthesized checkout-scanner beep; not an official AH recording.
       osc.frequency.setValueAtTime(2400,now);
       gain.gain.setValueAtTime(0.0001,now);
-      gain.gain.exponentialRampToValueAtTime(0.075,now+0.003);
-      gain.gain.setValueAtTime(0.075,now+0.065);
-      gain.gain.exponentialRampToValueAtTime(0.0001,now+0.085);
+      gain.gain.exponentialRampToValueAtTime(0.16,now+0.003);
+      gain.gain.setValueAtTime(0.16,now+0.095);
+      gain.gain.exponentialRampToValueAtTime(0.0001,now+0.12);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
       osc.onended=()=>{osc.disconnect();gain.disconnect();};
-      osc.stop(now+0.09);
+      osc.stop(now+0.125);
     }catch(e){}
+    });
   }
 
   async _startCamera(){
     if(!this._scanner||!this._shouldScannerRun())return;
     this._stopCamera();
+    this._armScanAudio();
     const generation=this._scanGeneration;
     this._scanCount=0;
     this._scanBusy=false;
@@ -959,7 +979,7 @@ class AhShoppingCard extends HTMLElement {
 
   async _initWasmWorker(){
     this._stopWasmWorker();
-    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.26');
+    const worker=new Worker('/ah_shopping/barcode-worker.js?v=0.2.27');
     this._decodeWorker=worker;
     await new Promise((resolve,reject)=>{
       const timeout=setTimeout(()=>reject(new Error('Barcode decoder could not be loaded')),10000);
@@ -1077,6 +1097,16 @@ class AhShoppingCard extends HTMLElement {
     }
     const video=this._scanner.querySelector('video');
     if(video.readyState<2||!video.videoWidth){this._scheduleScan();return;}
+    // RAF can run twice as fast as the camera. Decode each captured frame once,
+    // rather than spending tablet CPU on a repeated image. No retry delay.
+    const captured=video.getVideoPlaybackQuality?.().totalVideoFrames;
+    const frameTime=captured>0?captured:video.currentTime;
+    const frameNow=performance.now();
+    // Some WebViews round timestamps or stop advancing the frame counter.
+    // Retry them within 80 ms rather than letting this optimisation stall.
+    if(Number.isFinite(frameTime)&&frameTime===this._lastScanFrameTime&&frameNow-this._lastScanFrameAt<80){this._scheduleScan();return;}
+    this._lastScanFrameTime=frameTime;
+    this._lastScanFrameAt=frameNow;
 
     const generation=this._scanGeneration;
     this._scanBusy=true;
@@ -1374,6 +1404,7 @@ class AhShoppingCard extends HTMLElement {
     this._scanLoop=null;
     this._scanBusy=false;
     this._decoderMisses=0;
+    this._lastScanFrameTime=null;
     try{this._zxingReader?.reset?.();}catch(e){}
     this._zxingReader=null;
     if(this._stream){
@@ -1495,6 +1526,9 @@ class AhShoppingCard extends HTMLElement {
     if(!this._visibilitySetup){
       this._visibilitySetup=true;
       document.addEventListener('visibilitychange',this._visibilityHandler);
+      this._audioGestureHandler ||= ()=>{if(this._scanner||this._audioContext)this._armScanAudio();};
+      document.addEventListener('pointerup',this._audioGestureHandler,true);
+      document.addEventListener('keydown',this._audioGestureHandler,true);
       window.addEventListener('location-changed',this._locationHandler);
       if('IntersectionObserver' in window){
         this._visibilityObserver=new IntersectionObserver(entries=>{
@@ -1525,6 +1559,8 @@ class AhShoppingCard extends HTMLElement {
     this._autoVisitArmed=true;
     this._clearScannerTimer();
     document.removeEventListener('visibilitychange',this._visibilityHandler);
+    document.removeEventListener('pointerup',this._audioGestureHandler,true);
+    document.removeEventListener('keydown',this._audioGestureHandler,true);
     window.removeEventListener('location-changed',this._locationHandler);
     this._visibilityObserver?.disconnect();
     this._visibilityObserver=null;

@@ -228,7 +228,7 @@ Read the [troubleshooting guide](docs/TROUBLESHOOTING.md) before reporting a dif
 - Product images are loaded from AH; the legacy decoder uses an external CDN.
 - This is a cloud integration. Internet is required for lookup, edits and account synchronisation.
 - No order checkout, payment, multiple favourites-list management or native To-do editing.
-- Camera performance and audio permission depend on the browser/device. An audible beep may require an initial user gesture.
+- Camera performance and audio permission depend on the browser/device. An audible beep may require an initial user gesture; the scanner shows **Geluid aan** while audio is blocked, with a test beep when pressed.
 - Barcode/catalogue availability and private APIs can change.
 
 ## Help, development and publication

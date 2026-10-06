@@ -127,6 +127,49 @@ const server=http.createServer((req,res)=>{
   for(const key of ['successGreen','cooldownBlocks','redAfterCooldown','pauseNotAbsence','heldAfterPause','deliberateRepeat','pendingBlocks','failedNoCooldown','cleanVisuals'])assert.equal(results[key],true,key);
   assert.equal(results.noFalsePositive,true);assert.equal(results.duplicateProtected,true);
   assert.equal(results.immediate,true);assert.equal(results.cooldown,true);
+  const audio=await page.evaluate(async()=>{
+   const Original=window.AudioContext;let started=0,resumed=0,peak=0,release;
+   class FakeAudio {
+    constructor(){this.state='suspended';this.currentTime=10;this.destination={};}
+    resume(){resumed++;return new Promise(resolve=>{release=()=>{this.state='running';this.onstatechange?.();resolve();};});}
+    createOscillator(){return {frequency:{setValueAtTime(){}},connect(){},disconnect(){},start(){started++;},stop(){}};}
+    createGain(){return {gain:{setValueAtTime(v){peak=Math.max(peak,v);},exponentialRampToValueAtTime(v){peak=Math.max(peak,v);}},connect(){},disconnect(){}};}
+   }
+   window.AudioContext=FakeAudio;
+   const c=document.createElement('ah-shopping-card');c._syncScannerVisibility=()=>{};document.body.append(c);
+   c._scanner=document.createElement('div');c._scanner.innerHTML=c._scannerView(true);
+   const beep=c._playScanBeep();const waitsForResume=started===0&&resumed===1&&!c._scanner.querySelector('#scanAudio').hidden;
+   release();await beep;const resumedBeep=started===1&&peak===.16&&c._scanner.querySelector('#scanAudio').hidden;
+   c._audioContext.state='suspended';document.dispatchEvent(new Event('pointerup'));const gestureResumes=resumed===2;
+   release();await Promise.resolve();await Promise.resolve();
+   c._audioContext.state='closed';const old=c._audioContext;const arm=c._armScanAudio();release();await arm;
+   const closedRecreated=c._audioContext!==old&&c._audioContext.state==='running';
+   c._audioContext.state='suspended';c._audioContext.resume=()=>Promise.reject(new Error('autoplay blocked'));
+   const rejectedSafely=await c._armScanAudio()===false;
+   const originalNow=Date.now;let now=1000;Date.now=()=>now;
+   c._audioContext.resume=FakeAudio.prototype.resume;const late=c._playScanBeep();now+=600;release();await late;
+   const noStaleBeep=started===1;Date.now=originalNow;
+   c.remove();c._audioContext.state='suspended';document.dispatchEvent(new Event('pointerup'));
+   const listenerRemoved=resumed===4;
+   window.AudioContext=Original;
+   return {waitsForResume,resumedBeep,gestureResumes,closedRecreated,rejectedSafely,noStaleBeep,listenerRemoved};
+  });
+  for(const [key,value] of Object.entries(audio))assert.equal(value,true,key);
+  const frames=await page.evaluate(async()=>{
+   const c=document.createElement('ah-shopping-card');
+   const canvas=document.createElement('canvas');canvas.width=400;canvas.height=100;
+   let frame=1;
+   Object.defineProperties(canvas,{readyState:{value:4},videoWidth:{value:400},videoHeight:{value:100},currentTime:{value:1}});
+   canvas.getVideoPlaybackQuality=()=>({totalVideoFrames:frame});
+   c._scanner={querySelector:()=>canvas};c._stream={};c._shouldScannerRun=()=>true;c._scheduleScan=()=>{};
+   c._scanCanvas=document.createElement('canvas');c._decoderMode='wasm';let attempts=0;
+   c._decodeWasm=async()=>{attempts++;return '';};
+   await c._scanFrame();await c._scanFrame();const repeatedSkipped=attempts===1;
+   frame++;await c._scanFrame();const newFrameImmediate=attempts===2;
+   c._lastScanFrameAt-=81;await c._scanFrame();const frozenRecovers=attempts===3;
+   return {repeatedSkipped,newFrameImmediate,frozenRecovers};
+  });
+  for(const [key,value] of Object.entries(frames))assert.equal(value,true,key);
   console.log('PASS: locally bundled WASM, EAN decoding, rotation, off-center full-frame search, frame scheduling and success-only cooldown');
  }finally{await browser.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

@@ -2,6 +2,13 @@
 
 Historical entries describe the behaviour of that version; the [README](README.md) describes the current release.
 
+### 0.2.27
+
+- Initialises scan audio for automatic/permanent scanners as well as the scan button. Resumes suspended audio on dashboard touches/keyboard interaction, handles rejected resumes and recreates closed audio contexts.
+- Shows a small “Geluid aan” button while audio is locked, with a test beep when pressed; hides it once audio is running. Makes the checkout-style beep more audible.
+- Plays the beep after audio has resumed and discards stale pending beeps rather than playing them much later. Successful additions remain the only automatic beep trigger.
+- Avoids repeatedly decoding the same captured frame, with an 80 ms fallback for WebViews with rounded/frozen frame metadata. Retains the successful-scan cooldown and camera/decoder fallbacks.
+
 ### 0.2.26
 
 - Requests 1080p camera input on Android as well, preserving more detail in thin barcode bars when supported by the camera.

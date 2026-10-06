@@ -13,7 +13,7 @@
 ```yaml
 lovelace:
   resources:
-    - url: /ah_shopping/ah-shopping-card.js?v=0.2.25
+    - url: /ah_shopping/ah-shopping-card.js?v=0.2.27
       type: module
 ```
 
@@ -45,6 +45,12 @@ Keep browser console/network errors for a bug report, but redact account data. I
 ## Same product should be scanned twice
 
 Wait for the line to return to red. Move the barcode away for more than 700 ms, then present it again. A continuously held barcode is deliberately ignored to prevent double additions. You can also use the overlay plus button.
+
+## Scan beep is silent
+
+Automatic and permanent scanners initialise audio as well. If the browser blocks sound until you interact, press **Geluid aan** in the camera view. It plays a test beep and disappears when browser audio is active. Dashboard touches and keyboard interaction also resume suspended scan audio.
+
+If audio is active but the test remains silent, check the device's media volume and browser/app mute settings. The automatic beep plays after AH accepts a product, not on failed lookups. Browser audio permissions still apply after a full page reload.
 
 ## Scanner or overlay disappears
 
