@@ -42,7 +42,7 @@ function decodeEANFromImageData(imageData){
 }
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; window.__ahShoppingScanOrder=window.__ahShoppingScanOrder||{seq:0,products:new Map()}; this._scanOrderState=window.__ahShoppingScanOrder; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
@@ -149,6 +149,20 @@ class AhShoppingCard extends HTMLElement {
     );
   }
 
+  _promoteScannedProduct(productId){
+    const pid=Number(productId||0);
+    if(pid<=0)return;
+    this._scanOrderState.products.set(pid,++this._scanOrderState.seq);
+  }
+
+  _chronologicalShoppingItems(items){
+    return [...(items||[])].sort((a,b)=>{
+      const aSeq=this._scanOrderState.products.get(Number(a?.product_id||a?.id||0))||0;
+      const bSeq=this._scanOrderState.products.get(Number(b?.product_id||b?.id||0))||0;
+      return bSeq-aSeq;
+    });
+  }
+
   _combinedItems(listItems,orderItems){
     const map=new Map();
 
@@ -204,7 +218,7 @@ class AhShoppingCard extends HTMLElement {
     }
 
     if(source==='shopping_list_and_order'){
-      const items=this._stableItems(this._combinedItems(list.items||[],order.items||[]),'combined');
+      const items=this._combinedItems(this._chronologicalShoppingItems(list.items||[]),order.items||[]);
       return {
         items,
         total_quantity:items.reduce((sum,i)=>sum+Number(i.quantity||0),0),
@@ -221,7 +235,7 @@ class AhShoppingCard extends HTMLElement {
     }
 
     return {
-      items:this._stableItems(list.items||[],'shopping_list'),
+      items:this._chronologicalShoppingItems(list.items||[]),
       total_quantity:list.total_quantity||0,
       total_price:list.estimated_total||0,
       unique_items:list.unique_items||0,
@@ -372,17 +386,14 @@ class AhShoppingCard extends HTMLElement {
   }
 
   _scannerView(permanent){
-    const camera=this._config.scan_camera==='rear'?'Rear':'Front';
-    const zoom=Number(this._config.scan_zoom||2).toFixed(2).replace(/\.00$/,'').replace(/0$/,'');
     return `<div id="inlineScanner" class="inlineScanner">
       <video playsinline muted autoplay></video>
       <div class="scanGuide"></div>
       <div id="scanRecent" class="scanRecent ${permanent?'':'withClose'}"></div>
       ${permanent?'':`<button id="scanClose" class="scanClose" aria-label="Sluit scanner">×</button>`}
-      <div class="scanHud ${permanent?'':'timed'}">
-        <span id="scanstatus" class="scanPill">Scanner starten…</span>
+      <div class="scanHud">
+        <span id="scanstatus" class="scanPill scanStatus" hidden></span>
         ${permanent?'':`<span id="scanTimer" class="scanPill scanTimer">Auto sluiten · 1:00</span>`}
-        <span id="scanmeta" class="scanPill">${camera} · ${zoom}×</span>
       </div>
     </div>`;
   }
@@ -543,8 +554,7 @@ class AhShoppingCard extends HTMLElement {
 
       this._scanCanvas=document.createElement('canvas');
       await this._initScannerEngine();
-      this._setScanStatus('Scanner actief');
-      this._updateScanMeta(track);
+      this._setScanStatus('');
       this._scheduleScan();
     }catch(e){
       this._setScanStatus(`Camera: ${e.message||e}`,true);
@@ -589,18 +599,11 @@ class AhShoppingCard extends HTMLElement {
     }
   }
 
-  _updateScanMeta(track){
-    const meta=this._scanner?.querySelector('#scanmeta');
-    if(!meta)return;
-    const camera=this._config.scan_camera==='rear'?'Rear':'Front';
-    const zoom=Number(this._config.scan_zoom||2).toFixed(2).replace(/\.00$/,'').replace(/0$/,'');
-    meta.textContent=`${camera} · ${zoom}×`;
-  }
-
   _setScanStatus(text,error=false){
     const status=this._scanner?.querySelector('#scanstatus');
     if(!status)return;
-    status.textContent=text;
+    status.textContent=error?text:'';
+    status.hidden=!error;
     status.classList.toggle('error',Boolean(error));
   }
 
@@ -842,8 +845,6 @@ class AhShoppingCard extends HTMLElement {
     this._heldBarcode=code;
     this._heldBarcodeLastSeen=now;
     this._scanQueue.push(code);
-    const status=this._scanner?.querySelector('#scanstatus');
-    if(status)status.textContent=`Gevonden: ${code} · verwerken…`;
     this._processScanQueue();
   }
 
@@ -858,13 +859,14 @@ class AhShoppingCard extends HTMLElement {
         const p={...(r.product||{})};
         p.barcode=code;
         p.quantity_on_list=Math.max(1,Number(p.quantity_on_list||1));
+        this._promoteScannedProduct(p.id);
         this._scanProduct=p;
         this._pushRecentProduct(p);
         this._playScanBeep();
         if(navigator.vibrate)navigator.vibrate(70);
         this._pulseScanner();
         this._renderScanResult();
-        this._setScanStatus('Scanner actief');
+        this._setScanStatus('');
         if(this._config.scanner_mode!=='permanent')this._armScannerTimer(5000);
       }catch(e){
         this._setScanStatus(e.message||String(e),true);
@@ -1002,7 +1004,7 @@ class AhShoppingCard extends HTMLElement {
     if(this._scannerRoute&&current!==this._scannerRoute){
       if(this._stream)this._stopCamera();
       this._clearScanSession();
-      this._setScanStatus('Camera gepauzeerd');
+      this._setScanStatus('');
     }
     this._syncScannerVisibility();
   }
@@ -1034,7 +1036,7 @@ class AhShoppingCard extends HTMLElement {
     const shouldRun=this._shouldScannerRun();
     if(!shouldRun){
       if(this._stream)this._stopCamera();
-      if(this._scanner)this._setScanStatus('Camera gepauzeerd');
+      if(this._scanner)this._setScanStatus('');
       return;
     }
     if(this._stream||this._cameraStarting)return;
@@ -1084,7 +1086,7 @@ class AhShoppingCard extends HTMLElement {
     this._clearScanSession();
   }
 
-  _css(){return `:host{display:block;height:100%;min-height:0;overflow:hidden}ha-card{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}.fullCard{height:100%;min-height:0;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:24px 18px;column-gap:16px;row-gap:5px;align-items:center;padding:18px 18px 12px}.title{grid-column:1;grid-row:1;align-self:center;min-width:0;font-size:20px;font-weight:700;line-height:24px;margin:0}.total{grid-column:2;grid-row:1;align-self:center;text-align:right;font-size:21px;font-weight:700;line-height:24px;margin:0}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px}.headerSub{grid-column:1;grid-row:2;align-self:center;margin:0;font-size:12px;line-height:18px}.headerMeta{grid-column:2;grid-row:2;align-self:center;margin:0;text-align:right;color:var(--secondary-text-color);font-size:12px;line-height:18px;white-space:nowrap}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.combinedBreakdown{font-size:10px;color:var(--secondary-text-color);white-space:nowrap}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.combinedQty span{font-size:13px;font-weight:700;min-width:22px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.inlineScanner{position:relative;flex:1 1 0;min-height:0;width:100%;overflow:hidden;background:#000}.inlineScanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transform-origin:center center;will-change:transform}.scanGuide{position:absolute;z-index:2;left:5%;right:5%;top:40%;height:20%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}.scanGuide:after{content:'';position:absolute;left:7%;right:7%;top:50%;height:2px;background:#f33}.scanRecent{position:absolute;z-index:4;top:10px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px;max-height:78%;overflow:hidden;pointer-events:none}.scanRecent.withClose{right:58px}.scanOverlayItem{pointer-events:auto;background:var(--card-background-color);border:0!important;border-radius:10px;box-shadow:0 2px 10px #0005;animation:scanRowIn .18s ease-out}.scanOverlayItem .compactMeta{min-height:14px}.scanOverlayItem .qty button{background:var(--secondary-background-color)}.scanClose{position:absolute;z-index:6;top:10px;right:10px;width:38px;height:38px;padding:0;border-radius:50%;background:#0009;color:#fff;font-size:24px;line-height:38px;backdrop-filter:blur(4px)}.scanHud{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:8px;pointer-events:none}.scanHud.timed{grid-template-columns:minmax(0,1fr) auto auto}.scanPill{display:inline-block;max-width:70%;padding:5px 8px;border-radius:999px;background:#0009;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px)}.scanTimer{max-width:none}.scanPill.error{background:var(--error-color,#c62828)}.inlineScanner.scanHit:after{content:'';position:absolute;z-index:3;inset:0;border:3px solid #00a03c;box-shadow:inset 0 0 28px #00a03c88;pointer-events:none;animation:scanFlash .22s ease-out}@keyframes scanFlash{from{opacity:1}to{opacity:0}}@keyframes scanRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0)}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.scanOverlayItem{grid-template-columns:42px minmax(0,1fr) auto}.scanOverlayItem .qty{grid-column:auto;justify-content:flex-end}.scanOverlayItem img,.scanOverlayItem .ph{width:38px;height:38px}.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
+  _css(){return `:host{display:block;height:100%;min-height:0;overflow:hidden}ha-card{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}.fullCard{height:100%;min-height:0;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:24px 18px;column-gap:16px;row-gap:5px;align-items:center;padding:18px 18px 12px}.title{grid-column:1;grid-row:1;align-self:center;min-width:0;font-size:20px;font-weight:700;line-height:24px;margin:0}.total{grid-column:2;grid-row:1;align-self:center;text-align:right;font-size:21px;font-weight:700;line-height:24px;margin:0}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px}.headerSub{grid-column:1;grid-row:2;align-self:center;margin:0;font-size:12px;line-height:18px}.headerMeta{grid-column:2;grid-row:2;align-self:center;margin:0;text-align:right;color:var(--secondary-text-color);font-size:12px;line-height:18px;white-space:nowrap}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.combinedBreakdown{font-size:10px;color:var(--secondary-text-color);white-space:nowrap}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.combinedQty span{font-size:13px;font-weight:700;min-width:22px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.inlineScanner{position:relative;flex:1 1 0;min-height:0;width:100%;overflow:hidden;background:#000}.inlineScanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transform-origin:center center;will-change:transform}.scanGuide{position:absolute;z-index:2;left:5%;right:5%;top:40%;height:20%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}.scanGuide:after{content:'';position:absolute;left:7%;right:7%;top:50%;height:2px;background:#f33}.scanRecent{position:absolute;z-index:4;top:10px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px;max-height:78%;overflow:hidden;pointer-events:none}.scanRecent.withClose{right:58px}.scanOverlayItem{pointer-events:auto;background:var(--card-background-color);border:0!important;border-radius:10px;box-shadow:0 2px 10px #0005;animation:scanRowIn .18s ease-out}.scanOverlayItem .compactMeta{min-height:14px}.scanOverlayItem .qty button{background:var(--secondary-background-color)}.scanClose{position:absolute;z-index:6;top:10px;right:10px;width:38px;height:38px;padding:0;border-radius:50%;background:#0009;color:#fff;font-size:24px;line-height:38px;backdrop-filter:blur(4px)}.scanHud{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:flex;justify-content:flex-end;align-items:flex-end;gap:8px;pointer-events:none}.scanPill{display:inline-block;max-width:70%;padding:5px 8px;border-radius:999px;background:#0009;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px)}.scanPill[hidden]{display:none!important}.scanStatus.error{margin-right:auto;background:var(--error-color,#c62828)}.scanTimer{max-width:none}.inlineScanner.scanHit:after{content:'';position:absolute;z-index:3;inset:0;border:3px solid #00a03c;box-shadow:inset 0 0 28px #00a03c88;pointer-events:none;animation:scanFlash .22s ease-out}@keyframes scanFlash{from{opacity:1}to{opacity:0}}@keyframes scanRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0)}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.scanOverlayItem{grid-template-columns:42px minmax(0,1fr) auto}.scanOverlayItem .qty{grid-column:auto;justify-content:flex-end}.scanOverlayItem img,.scanOverlayItem .ph{width:38px;height:38px}.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
 }
 if(!customElements.get('ah-shopping-card'))customElements.define('ah-shopping-card',AhShoppingCard);
 window.customCards=window.customCards||[];
