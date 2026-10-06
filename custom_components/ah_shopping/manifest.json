@@ -5,15 +5,15 @@
     "@digital-IMEI"
   ],
   "config_flow": true,
-  "documentation": "https://github.com/digital-IMEI/home-assistant-ah-shopping",
-  "issue_tracker": "https://github.com/digital-IMEI/home-assistant-ah-shopping/issues",
-  "integration_type": "service",
-  "iot_class": "cloud_polling",
-  "requirements": [],
-  "version": "0.2.24",
   "dependencies": [
     "frontend",
     "http",
     "lovelace"
-  ]
+  ],
+  "documentation": "https://github.com/digital-IMEI/home-assistant-ah-shopping",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/digital-IMEI/home-assistant-ah-shopping/issues",
+  "requirements": [],
+  "version": "0.2.24"
 }

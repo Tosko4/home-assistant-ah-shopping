@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem without sharing private account data.
+title: "[Bug]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: "Read the troubleshooting guide first. Never paste authorization URLs, tokens, account/list/order IDs, delivery details or private camera images."
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      placeholder: "0.2.25"
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Device and browser/app
+      placeholder: "Device model, browser/app version; Fully Kiosk/WebView if applicable"
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Shopping list / quantity edits
+        - Scanner / camera
+        - Scheduled order / combined view
+        - Prices / Bonus
+        - Login / synchronisation
+        - Installation / card loading
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction, expected behaviour and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Relevant card YAML and redacted errors
+      description: "For scanner issues include decoder, zoom and camera selection. For pricing include anonymised product/price/promotion fields."
+      render: yaml
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed credentials, account identifiers and private images from this report.
+          required: true

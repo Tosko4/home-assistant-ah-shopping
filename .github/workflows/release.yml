@@ -1,14 +1,14 @@
 name: Publish integration release
 
 on:
-  push:
+  workflow_run:
+    workflows: [Validate]
+    types: [completed]
     branches: [main]
-    paths:
-      - custom_components/ah_shopping/manifest.json
-  workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: ah-shopping-release-${{ github.ref }}
@@ -16,9 +16,13 @@ concurrency:
 
 jobs:
   release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
       - name: Read integration version
         id: version
         shell: bash
@@ -29,10 +33,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION already exists"
             exit 0
           fi
-          gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes
+          gh release create "$VERSION" --target "$VALIDATED_SHA" --title "$VERSION" --generate-notes

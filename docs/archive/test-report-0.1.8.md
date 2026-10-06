@@ -1,3 +1,7 @@
+# Historical test report
+
+Archived from the repository root; **not** a report for the current release. See [CONTRIBUTING.md](../../CONTRIBUTING.md) and the validation workflow for current tests.
+
 # AH Shopping 0.1.8 – test report
 
 Verified locally on the MVP source tree:

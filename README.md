@@ -1,490 +1,243 @@
-# Albert Heijn Shopping
+# Albert Heijn Shopping for Home Assistant
 
-<p align="center"><img src="brand/logo.png" width="128" alt="Albert Heijn logo"></p>
+<p align="center"><img src="brand/logo.png" width="120" alt="Albert Heijn"></p>
 
-Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a practical shopping cart in Home Assistant, including a bundled camera barcode-scanner card and read-only visibility of the next scheduled order.
+[![Validation](https://github.com/digital-IMEI/home-assistant-ah-shopping/actions/workflows/validate.yml/badge.svg)](https://github.com/digital-IMEI/home-assistant-ah-shopping/actions/workflows/validate.yml)
+[![Release](https://img.shields.io/github/v/release/digital-IMEI/home-assistant-ah-shopping)](https://github.com/digital-IMEI/home-assistant-ah-shopping/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
+**Scan your groceries straight into your Albert Heijn list — from your Home Assistant dashboard.**
 
-## 0.2.24
+A custom integration with a bundled dashboard card for AH **Mijn lijst**, product quantities, prices, Bonus savings and your next scheduled order. Use a phone, laptop or a wall-mounted tablet as a camera barcode scanner.
 
-- Authenticated connection to your AH account
-- Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
-- Rich cart overview in Home Assistant
-- Reads the next scheduled AH order and its products
-- Search AH products and add them
-- Increase, decrease and remove quantities
-- Shows current price, old price, product image and Bonus text
-- Estimated list total
-- Inline camera barcode scanner directly inside the dashboard
-- On-demand and permanent scanner modes
-- Front/rear camera selection and configurable 1×–4× zoom (2× default)
-- Local EAN-13/EAN-8 decoding; UPC-A is handled as EAN-13 with a leading zero
-- Native read-only `todo` entity for standard Home Assistant list views
+> **Unofficial community integration for Albert Heijn Netherlands.** Not affiliated with Albert Heijn or Ahold Delhaize. It relies on private AH APIs, which can change without notice. Available through a **HACS custom repository**, not yet included in the default HACS catalogue.
+
+[Installation](#installation) · [Dashboard examples](#dashboard-examples) · [Settings](#settings) · [Entities and actions](#entities-and-actions) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Changelog](CHANGELOG.md)
+
+## What it does
+
+- **Editable shopping list:** view AH Mijn lijst, add products by barcode or action, adjust quantities and remove products.
+- **Product details:** images, unit sizes, current prices, previous prices and Bonus labels.
+- **Scheduled order:** read-only products, quantities and delivery date/time.
+- **Combined overview:** merge identical products from the list and the next order, while keeping ordered and extra quantities separate.
+- **Camera barcode scanner:** on-demand, automatically active on entering a dashboard, or a permanent feed.
+- **Fast local decoding:** bundled ZXing-C++/WebAssembly in a background worker, with alternative decoders for different devices.
+- **Scan feedback:** a locally generated checkout-style beep, a green scan line during the 1.2-second successful-add cooldown, and a recent-product feed with quantity controls.
+- **Comfortable editing:** stable rows and scroll position; four seconds to undo a last-quantity removal with the plus button, followed by a smooth collapse.
+- **Automation support:** sensors, a read-only native To-do list, and actions for search, lookup, quantities and refresh.
+- **Account synchronisation:** configurable polling and protected recent writes to reduce stale refresh conflicts.
+
+### Important: list, cart and order
+
+The editable source is AH's account-wide **Mijn lijst**, labelled **Winkelmandje** in the card. It is **not** an API for submitting, paying for or changing a confirmed order.
+
+In the combined view, the ordered quantity is a read-only minimum. Minus removes only extra list quantity; plus adds to Mijn lijst. Once AH reports the order cut-off has passed, the order disappears from the **combined** view. The separate next-order view remains read-only.
 
 ## Installation
 
-Add `https://github.com/digital-IMEI/home-assistant-ah-shopping` as a HACS custom repository, category **Integration**, install **Albert Heijn Shopping**, restart Home Assistant, then add the integration under **Settings → Devices & services**.
+### Requirements
 
-The setup flow is intentionally identical to Albert Heijn Delivery: it opens the AH login page, exchanges the one-time `appie://...code=...` authorization code, and validates authentication with the same proven GraphQL query. The shopping list itself is read separately from `/mobile-services/shoppinglist/v2/items`.
+- Home Assistant **2026.8.2 or newer**.
+- An Albert Heijn Netherlands account and internet access to AH.
+- HACS, or a manual custom-integration installation.
+- For scanning: a camera and browser camera permission. Use **HTTPS** (or another browser-approved secure context); a working camera preview is device/browser-dependent.
+- One AH account per installation is recommended. Multi-account action routing is not supported.
 
-## Dashboard card
+### HACS — recommended
 
-The card JS is registered automatically by the integration; no separate Lovelace resource is required.
+1. Open **HACS → ⋮ → Custom repositories**.
+2. Add `https://github.com/digital-IMEI/home-assistant-ah-shopping` with type **Integration**.
+3. Find **Albert Heijn Shopping**, download it and restart Home Assistant.
+4. Open **Settings → Devices & services → Add integration → Albert Heijn Shopping**.
+
+This is an integration, **not** a separate HACS frontend/card repository. The dashboard card and decoder assets are included.
+
+### Connect your AH account
+
+1. Open the AH login link shown by the integration.
+2. Log in on AH's own page.
+3. When redirected to `appie://login-exit?...`, copy the complete redirect URL or its `code` value.
+4. Paste it into the setup form.
+
+If the browser hands the link to the AH app instead of exposing the URL, try a desktop browser. Obtain a fresh code if AH rejects it; authorization codes are short-lived and single-use.
+
+The integration does not store your AH password. It stores access and refresh tokens in Home Assistant to maintain the connection. Keep these tokens, redirect URLs and backups private.
+
+### Manual installation
+
+Download a [release](https://github.com/digital-IMEI/home-assistant-ah-shopping/releases), copy `custom_components/ah_shopping` into your Home Assistant `config/custom_components` directory, then restart and add the integration. Avoid an extra nested folder.
+
+### Updates
+
+Update through HACS, restart Home Assistant and reload dashboard clients. If a browser keeps an old card, perform a hard refresh or clear its site cache. The integration updates its versioned Lovelace resource automatically in storage mode.
+
+## Dashboard examples
+
+Add a **Manual** dashboard card with:
 
 ```yaml
 type: custom:ah-shopping-card
 title: Boodschappen
-```
-
-Optionally specify the list sensor explicitly:
-
-```yaml
-type: custom:ah-shopping-card
-entity: sensor.albert_heijn_shopping_list
-title: Boodschappen
-```
-
-### Card sections
-
-The card has three independently configurable sections:
-
-```yaml
-type: custom:ah-shopping-card
-title: Winkelmandje
-show_header: true
-show_scan: true
-show_products: true
 product_source: shopping_list
-scan_label: Scan product
 ```
 
-- `show_header`: title, item count and total amount.
-- `show_scan`: full-width barcode scan button.
-- `show_products`: product rows.
-- `product_source`: which product set the card displays.
-
-Card height is **not configured in pixels**. The card implements Home Assistant's grid sizing API and follows the size selected in the dashboard **Layout** panel. When the available height is smaller than the product list, the products scroll inside the card. The card only enforces a small minimum height.
-
-Available product sources:
-
-```yaml
-product_source: shopping_list            # Winkelmandje (AH Mijn lijst), editable
-product_source: next_order               # eerstvolgende ingeplande bestelling, read-only
-product_source: shopping_list_and_order  # Winkelmandje + volgende bestelling
-```
-
-The combined view merges identical products by product id but keeps the two source quantities separate. The displayed quantity is the combined total. The **Bestelling** quantity is a hard read-only minimum: minus only removes extra Winkelmandje quantity and disappears when the total reaches the ordered quantity. Plus is always available for product rows and adds one to Winkelmandje, including products that currently exist only in the scheduled order. The scheduled order is never modified.
-
-AH exposes the order cut-off directly through the fulfillment fields `isAfterCutOff` and `closingDateTime`. As soon as `isAfterCutOff` becomes true, the scheduled order is no longer included in **Winkelmandje + volgende bestelling**: its product rows, quantities, delivery slot and order total are all removed from the combined card. The separate **Volgende bestelling** source remains available as a read-only overview after cut-off.
-
-For backwards compatibility, old `product_source: cart` cards automatically map to `shopping_list`, and old `cart_and_order` cards map to `shopping_list_and_order`.
-
-For a scanner-only card:
+### Shopping list and next order
 
 ```yaml
 type: custom:ah-shopping-card
-show_header: false
-show_scan: true
-show_products: false
-scan_label: Scan product
-```
-
-Existing cards using `mode: scan_only` remain compatible.
-
-### Scanner modes
-
-The scanner is part of the same `custom:ah-shopping-card`.
-
-Default/on-demand mode keeps the normal shopping card visible. Pressing **Scan product** replaces the product list with the live camera feed until the scanner is closed:
-
-```yaml
-type: custom:ah-shopping-card
+title: Boodschappen
 product_source: shopping_list_and_order
-scanner_mode: button
-scan_camera: front
-scan_zoom: 2
+scanner_mode: button_auto
+scan_camera: rear
+scan_zoom: 1
 scan_decoder: auto
 ```
 
-Use `scanner_mode: button_auto` (**Via scan button — start active**) to open the camera when the card loads, then return to the list after scanning. Both button modes close after 60 seconds without a scan, or 10 seconds after the last successful scan. Use the scan button to start another session. The permanent feed does not auto-close.
+The scanner opens when entering this dashboard, returns to the list after the session and starts again on a later visit. Closing it manually keeps it closed for the current visit.
 
-For a dedicated scanner card next to a separate shopping-list card, use permanent mode:
+### Dedicated scanner next to a list card
 
 ```yaml
 type: custom:ah-shopping-card
 scanner_mode: permanent
 scan_camera: front
-scan_zoom: 2
+scan_zoom: 1
 scan_decoder: auto
 show_header: false
 ```
 
-The permanent feed only runs while the card is actually visible: the browser/app must be in the foreground, the dashboard view must be active and the card must intersect the visible viewport. Leaving the view, hiding the app or scrolling the card fully out of view stops the camera stream; returning restarts it.
+Put a second card alongside it with `product_source: shopping_list_and_order`. The permanent camera only runs while its card is visible in an active, foreground dashboard.
 
-The feed always fills the Home Assistant-assigned card size and stays centered using a cover-style crop, without imposing its own aspect ratio. `scan_zoom` supports 1× to 4× and defaults to 2×. Hardware camera zoom is used when exposed by the browser/WebView; any remaining zoom is applied as a centered digital crop. `scan_camera` can be `front` or `rear`.
+### Read-only delivery overview
 
-Up to five recently scanned products are shown as rows over the video feed. The newest row is fully opaque; older rows fade to 80%, 60%, 40% and 20%. Scanning the same product again updates its quantity and moves that product back to the top instead of creating a duplicate row. The overlay quantity controls write to Winkelmandje and can reduce an item all the way to zero.
+```yaml
+type: custom:ah-shopping-card
+title: Volgende bestelling
+product_source: next_order
+show_scan: false
+```
 
-### Test barcode
+Card size is controlled through the Home Assistant dashboard **Layout** settings. Long lists scroll inside the card; there is no pixel-height card option.
 
-For a quick camera test, use EAN-13 `8710400169468` (AH Biologisch Halfvolle melk 1 l at the time of writing).
+## Settings
 
-### Camera requirements
+### Integration
 
-Camera access uses `navigator.mediaDevices.getUserMedia()` on the device displaying the dashboard. HTTPS is strongly recommended and may be required by the browser/WebView. On Android/Fully Kiosk, allow camera permission for Fully Kiosk. On iPhone/iPad, allow camera permission for the browser/Home Assistant WebView.
+Open the integration's **Configure** screen.
 
-The scanner supports grocery-style **EAN-13, EAN-8, UPC-A and UPC-E**. `scan_decoder` can be set to `auto` (default/recommended), `zxing`, `native` or `local`. Auto uses ZXing as the primary decoder, keeps Native BarcodeDetector available as a sampled fallback when supported, and uses the bundled lightweight EAN decoder as the final fallback. Explicit decoder selections stay on the selected engine so users can compare what works best for their camera/browser. If a forced decoder is unavailable, the card shows a clear error instead of silently switching engines.
+| Setting | Default | Range / behaviour |
+| --- | --- | --- |
+| Full update interval | 5 minutes | 1–60 minutes. Successful writes update locally and trigger reconciliation between full polls. |
 
-## Entities
+### Dashboard card
 
-- AH **Winkelmandje** sensor — the existing shopping-list entity (existing installations can keep `sensor.albert_heijn_shopping_list`); state is total quantity and attributes contain all products
-- `sensor.albert_heijn_shopping_estimated_total` — estimated EUR total for Winkelmandje
-- `sensor.albert_heijn_shopping_bonus_savings` — calculated supported Bonus savings
-- `sensor.albert_heijn_next_order` — total quantity in the next scheduled AH order; attributes include order id, delivery date/time, total price, unique item count and all ordered product lines
-- native read-only To-do entity for Winkelmandje
+Most settings are available in the visual card editor. `entity` is an optional YAML setting.
 
-## Services
+| Setting | Default | Options / behaviour |
+| --- | --- | --- |
+| `title` | Source label | Custom header title. |
+| `entity` | Auto-detected | Explicit AH shopping-list sensor; does not select a different scheduled-order account. |
+| `product_source` | `shopping_list` | `shopping_list`, `next_order`, `shopping_list_and_order`. |
+| `show_header` | `true` | Show title, count, total, Bonus savings and delivery information where available. |
+| `show_scan` | `true` | Show the scan button when the scanner is closed. Does not disable permanent/start-active modes. |
+| `show_products` | `true` | Show ordinary list rows when the scanner is closed. |
+| `scanner_mode` | `button` | `button`: on-demand; `button_auto`: start active on each dashboard visit; `permanent`: visible camera feed. |
+| `scan_camera` | `front` | `front` or `rear`; browser chooses the matching available camera. |
+| `scan_zoom` | `2` | 1×–4×; editor steps of 0.25. Hardware zoom when available, otherwise a digital crop. |
+| `scan_decoder` | `auto` | `auto`, `wasm`, `zxing`, `native`, `local`; see below. |
+| `scan_label` | `Scan product` | Text on the scan button. |
 
-- `ah_shopping.search_products`
-- `ah_shopping.lookup_barcode`
-- `ah_shopping.add_product`
-- `ah_shopping.add_barcode`
-- `ah_shopping.set_quantity`
-- `ah_shopping.remove_product`
-- `ah_shopping.refresh`
+Legacy `product_source: cart` / `cart_and_order` map to `shopping_list` / `shopping_list_and_order`. Legacy `mode: scan_only` remains compatible.
 
-## Synchronisation and conflicts
+### Scanner behaviour
 
-The full AH list is polled every **5 minutes by default**. The interval is configurable from the integration's **Configure** screen between 1 and 60 minutes.
+- Button modes close after **60 seconds without a first successful scan**, or **10 seconds after the latest successful scan**. Permanent mode does not auto-close.
+- A successful AH addition starts a **1.2-second pause**. The horizontal line turns green for that pause, then red when scanning resumes. Failed decoding attempts have no fixed retry delay.
+- A barcode held in view is not repeatedly added. To intentionally scan the same product again, remove it from view for more than **700 ms after the pause**, then present it again.
+- The newest overlay row stays for **10 seconds**. When a new scan makes it translucent, it gets **5 seconds**. Older translucent rows retain their deadlines.
+- Plus/minus in the overlay updates the existing row without rebuilding the feed, and restarts that row's current 10- or 5-second period.
+- A last-quantity removal in the ordinary list stays at **0 for four seconds**, allowing plus to restore it before deletion. Leaving the dashboard commits an outstanding removal.
+- These timings are built-in behaviour, **not configurable settings**.
 
-Writes do not wait for the next poll. After a successful AH write, Home Assistant updates immediately and schedules a reconciliation pull after about 1 second. Recent local quantity changes are protected for up to 20 seconds from an eventually-consistent/stale AH response. As soon as AH returns the requested value, the pending change is confirmed and cleared. If AH continues to disagree after that protection window, the AH server becomes authoritative again.
+### Decoder choices
 
-Writes for the same product are serialized inside the integration. Explicit absolute quantity changes are last-successful-write-wins when multiple clients edit the same product concurrently.
+| Decoder | Use |
+| --- | --- |
+| `auto` | Recommended. Starts with locally bundled ZXing-C++/WebAssembly. Falls back if initialization fails; runtime worker failure falls back to Local EAN with a visible error. |
+| `wasm` | Explicit ZXing-C++ worker. Initialization errors are visible; runtime failure can recover to Local EAN. |
+| `zxing` | Legacy JavaScript ZXing, loaded from jsDelivr. Requires that CDN to be reachable. |
+| `native` | Browser BarcodeDetector, if supported. Availability varies by browser. |
+| `local` | Bundled lightweight EAN decoder; useful as a basic fallback. |
 
-## Known limitations
+The main C++ route supports **EAN-13, EAN-8 and UPC-A** and rotated codes. UPC-E support depends on the legacy/native route; it is not advertised as supported by the C++ worker. Check digits are validated before adding a decoded product.
 
-- The editable **Winkelmandje** in this integration is AH's account-wide "Mijn lijst". Multiple favorites lists are not handled.
-- Bonus totals are calculated for the supported promotion formats; unknown future AH promotion wording can still make the displayed total an estimate.
-- Barcode reliability still depends on camera focus, light and barcode size.
+You do not need to align the barcode exactly inside the guide: after missed attempts the scanner also searches the full camera image. Clear focus and adequate barcode size still matter.
 
-## Next likely steps
+## Entities and actions
 
-1. Multiple AH lists.
-2. Better exact Bonus total calculation.
-3. Optional native todo mutations if there is a clear use case.
-4. Wider barcode support (Code 128 / Data Matrix) if real-world products require it.
+### Entities
 
-### 0.1.6
+Entity IDs depend on Home Assistant naming and existing installations; use the integration's entity list rather than assuming a fixed ID.
 
-- Fixes empty AH list parsing for the current shoppinglist v2 response.
-- Reads product IDs from nested `productDetails.product.webshopId`.
-- Keeps free-text AH list items visible instead of dropping them.
-- Uses the current `orderBy=userInput&orderByParam=0` list read URL.
+| Entity name | Provides |
+| --- | --- |
+| Albert Heijn Shopping Cart sensor | Total list quantity; product lines, prices, calculated totals, sync timestamp and pending-change attributes. Existing installations may use `sensor.albert_heijn_shopping_list`. |
+| Albert Heijn Shopping Estimated Total | Calculated list product total in EUR. |
+| Albert Heijn Shopping Bonus Savings | List-only Bonus savings; zero is correct if the list has no supported discounted products. |
+| Albert Heijn Next Order | Next scheduled order quantity; products, delivery slot, status, cut-off and price attributes. |
+| Albert Heijn Next Order Bonus Savings | Calculated savings belonging to the order, separate from the list. |
+| Albert Heijn Shopping Cart To-do | Read-only native Home Assistant To-do representation. Edit products through the custom card or integration actions. |
 
+### Actions
 
-### 0.1.7
+All action names use the `ah_shopping` domain. Search and lookup require a response variable.
 
-- Fixes list totals when AH returns prices as nested money objects such as `{"amount": 1.10}`.
-- Supports doubly nested money values used by some AH API responses.
+| Action | Required fields | Optional fields | Effect |
+| --- | --- | --- | --- |
+| `search_products` | `query` | `limit` (1–20; default 8) | Search catalogue; response contains `products`. |
+| `lookup_barcode` | `barcode` | — | Look up without adding; response contains `product`. |
+| `add_product` | `product_id` | `quantity` (1–99; default 1) | Add/increment a list product. |
+| `add_barcode` | `barcode` | `quantity` (1–99; default 1) | Resolve and add/increment a product. |
+| `set_quantity` | `product_id`, `quantity` (0–99) | — | Set absolute list quantity; 0 removes it immediately. |
+| `remove_product` | `product_id` | — | Remove from the list immediately. |
+| `refresh` | — | — | Request a list refresh. |
 
+The four-second undo is a **card feature**; direct actions do not delay removals. Actions operate on the first loaded AH account.
 
-### 0.1.8
+Example for a script or automation action sequence:
 
-- Uses the shopping-list product payload and product-detail endpoint as fallbacks when AH omits unavailable products from bulk product lookup.
-- Calculates supported multi-buy Bonus savings, including `2e halve prijs`.
-- Adds a Bonus savings sensor.
-- Regression-tested against a real list where €32.02 subtotal minus €2.89 Bonus equals the AH app total of €29.13.
+```yaml
+- action: ah_shopping.search_products
+  data:
+    query: havermelk
+    limit: 5
+  response_variable: ah_results
+```
 
+## Prices and Bonus: what the total means
 
-### 0.1.9
+Totals are calculated **product totals**, not guaranteed final checkout invoices. The order card uses `estimated_product_total` when available; AH's `total_price` remains a separate sensor attribute. Delivery charges, deposits, unavailable products, substitutions and promotions the integration cannot interpret may cause differences.
 
-- Uses the browser/WebView native `BarcodeDetector` for EAN/UPC scanning when available.
-- Falls back to the bundled local EAN decoder when native detection is unavailable.
-- Shows live scanner diagnostics including decoder mode and scanned frame count.
-- Requests a higher camera resolution for improved barcode recognition.
-- Adds a frontend cache-buster so Fully Kiosk/Home Assistant does not keep an older scanner script after updating.
+Supported calculations include current discounted unit prices, second half price, 1+1 free, “N halen M betalen” and “N voor X”. Mixed-product promotions are grouped only for the specifically implemented Big Americans pizza offer, not merely because two products share the same Bonus text. Unknown/personalised promotion rules are not guaranteed.
 
+Read the [troubleshooting guide](docs/TROUBLESHOOTING.md) before reporting a difference, and never publish account identifiers, addresses or authorization data.
 
-### 0.1.10
+## Privacy and limitations
 
-- Adds `mode: scan_only` for a compact scanner-only dashboard card.
-- Adds configurable `height` in pixels for the full card.
-- When a fixed height is configured, the product list scrolls internally while the header/search controls remain visible.
-- Adds optional `scan_label` for the scanner-only button.
+- Barcode decoding happens on the dashboard device. Camera frames are not sent to AH by this integration; AH receives barcode lookups and account/list requests.
+- Product images are loaded from AH; the legacy decoder uses an external CDN.
+- This is a cloud integration. Internet is required for lookup, edits and account synchronisation.
+- No order checkout, payment, multiple favourites-list management or native To-do editing.
+- Camera performance and audio permission depend on the browser/device. An audible beep may require an initial user gesture.
+- Barcode/catalogue availability and private APIs can change.
 
+## Help, development and publication
 
-### 0.1.11
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Report a bug](https://github.com/digital-IMEI/home-assistant-ah-shopping/issues/new/choose)
+- [Contributing and tests](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Publication checklist](docs/PUBLISHING.md)
+- [Changelog](CHANGELOG.md)
 
-- Quantity changes no longer wait for the full shopping-list/product refresh.
-- After a successful AH PATCH, Home Assistant updates the local coordinator immediately and refreshes the complete list in the background.
-- The dashboard card keeps a per-product pending quantity and serialises rapid +/- clicks, so repeated taps are not ignored while a previous write is in flight.
-
-
-### 0.1.12
-
-- Adds ZXing 0.23.0 as the primary barcode fallback for browsers without native BarcodeDetector, including Microsoft Edge contexts where BarcodeDetector is unavailable.
-- Scanner order is now: native BarcodeDetector → ZXing → bundled lightweight EAN fallback.
-- ZXing reuses the already-open camera feed; it does not request a second camera session.
-- Scanner status shows whether native, ZXing or local fallback is active and counts processed frames.
-- Prevents duplicate custom-element registration if Home Assistant loads the card module twice.
-
-
-### 0.1.13
-
-- Plays a short locally generated checkout-scanner beep after a barcode has been resolved and successfully added to the AH list.
-- Keeps the scanner open after a successful scan and shows product image, name, current price, unit size and Bonus label.
-- Adds +/- quantity controls directly to the scan result.
-- Adds "Scan volgende" and "Klaar" actions instead of auto-closing the scanner after one second.
-- Newly scanned products are inserted into the Home Assistant coordinator immediately, before the background AH refresh completes.
-- Keeps an active scanner modal open while Home Assistant entity updates arrive, preventing scan-result UI from disappearing mid-flow.
-
-
-### 0.2.0
-
-- Preserves the internal list scroll position across quantity/state updates, so +/- on a bottom item no longer jumps the card back to the top.
-- Fixes product search for both AH `products` and `data` response shapes and normalises alternate title/price/unit/image fields.
-- Adds visible search states: searching, no results and errors.
-- Adds an in-card manual refresh button and shows pending sync changes.
-- Adds checked/completed state to list items and a checkbox in the custom card.
-- Makes the native Home Assistant To-do entity writable: create free-text items, check/uncheck and delete.
-- Quantity writes now preserve item description and checked state.
-- Adds conflict-safe reconciliation: local successful writes are protected against stale immediate reads, then reconciled back to AH.
-- Serializes writes for the same product.
-- Adds configurable full polling interval (1–60 minutes, default 5).
-- Adds list diagnostics attributes: `last_synced`, `pending_changes`, and `update_interval_seconds`.
-
-
-### 0.2.1
-
-- Reverts the writable native To-do/checkbox functionality; the native To-do entity is read-only again.
-- Scanner is now a continuous session: up to 60 seconds before the first successful scan.
-- After a successful scan, the camera remains active for 5 seconds; every subsequent successful scan resets that 5-second window.
-- Keeps the camera running while barcode lookups and list writes are processed.
-- Prevents the same barcode from being selected repeatedly while it remains in view. To scan the same product again, move it out of frame briefly and present it again.
-- Shows the latest successfully scanned product in a panel to the right of the camera, including image, product name, price, Bonus information, current list quantity and +/- controls.
-- On narrow screens the scanned-product panel moves below the camera.
-
-
-### 0.2.2
-
-- Removes the product-search bar from the dashboard card.
-- Makes the scan button full width.
-- Adds independent card options `show_header`, `show_scan` and `show_products`.
-- Keeps legacy `mode: scan_only` cards working.
-- Adds `sensor.albert_heijn_next_order` for the earliest open scheduled AH fulfillment.
-- The next-order sensor exposes total quantity, unique product count, delivery slot, total order price, modifiable status and all product lines with quantity/price/Bonus/category details.
-
-
-### 0.2.3
-
-- Adds an active AH shopping-cart sensor using `/mobile-services/order/v1/summaries/active?sortBy=DEFAULT`.
-- Adds dashboard `product_source` choices for shopping list, active cart, next scheduled order, or cart + order combined.
-- Combined cart/order view merges identical products and sums their quantities.
-- Cart/order product views are intentionally read-only; +/- remains limited to the shopping list.
-- The scanner continues to add products to the shopping list regardless of the displayed product source.
-- Card title defaults to the selected product source unless a custom title is configured.
-
-
-### 0.2.4
-
-- Makes `product_source: cart` editable from the dashboard card.
-- Adds +/- quantity controls and remove for active cart products.
-- Writes cart changes through `PUT /mobile-services/order/v1/items?sortBy=DEFAULT`.
-- Applies successful cart changes immediately in Home Assistant and reconciles with AH after about 1 second.
-- Protects recent cart writes from stale AH responses for up to 20 seconds, matching the shopping-list conflict strategy.
-- Adds `ah_shopping.set_cart_quantity` and `ah_shopping.remove_cart_product` services.
-- Keeps `product_source: next_order` and `product_source: cart_and_order` read-only.
-- Cart total price remains the last AH-calculated total while a quantity write is pending; AH recalculates it on the reconciliation refresh.
-
-
-### 0.2.5
-
-- Removes the separate active-order cart source introduced in 0.2.3/0.2.4.
-- Renames AH "Mijn lijst" to **Winkelmandje** in the dashboard/UI while keeping its existing underlying integration data and unique IDs compatible.
-- Product sources are now only: Winkelmandje, Next order, and Winkelmandje + Next order.
-- Adds a combined Winkelmandje + Next order view that merges identical products and sums quantities.
-- All scanning and editable product actions continue to write to AH "Mijn lijst" (now presented as Winkelmandje).
-- Keeps the next scheduled order read-only.
-- Removes the pixel `height` option from the card editor.
-- Implements Home Assistant `getGridOptions()` so card height is controlled from the dashboard Layout panel.
-- The product list scrolls inside the Home Assistant-assigned card height.
-- Legacy `product_source: cart` and `cart_and_order` configs are migrated in the frontend to the new source names.
-
-
-### 0.2.6
-
-- Replaces the standalone scan action with Home Assistant's native `ha-button` component and fixes its spacing/alignment.
-- Adds a subtle auto-close countdown overlay inside the camera field.
-- Countdown starts at 1:00 when the scanner opens and resets to 0:05 after every successful scan.
-- Makes the combined Winkelmandje + bestelling view partially editable: only the Winkelmandje quantity can be changed; order quantity remains read-only.
-- Combined rows now retain separate Winkelmandje and Bestelling quantities even when the same product exists in both.
-- Makes combined-list rows more compact with smaller images, reduced spacing and compact source labels.
-
-
-### 0.2.7
-
-- Treats the scheduled-order quantity as the hard minimum in the combined list.
-- Combined rows now display the total quantity: ordered + Winkelmandje.
-- Minus only decreases the Winkelmandje quantity and disappears when the total reaches the ordered quantity.
-- Plus remains available at the order minimum and adds the product to Winkelmandje.
-- Removes the combined-row delete button so an order quantity can never be confused with an editable quantity.
-- Shows a compact breakdown such as `2 besteld · 1 extra`.
-- Allows setting a positive Winkelmandje quantity for a product that exists only in the order by resolving its product details first.
-- Aligns the scanned-product panel to the top of the scanner and uses the same compact row styling as the normal product list.
-
-
-### 0.2.8
-
-- Adds a bright white fill-light panel on the left side of the screen while the **front camera** is active.
-- The fill light covers the middle third of the screen height to illuminate packaging close to the tablet camera.
-- Reduces the visible barcode guide to about 60% of the camera width and 20% of its height, encouraging a larger camera-to-product distance for better focus.
-- Aligns the bundled local decoder crop with the smaller scan guide.
-
-
-### 0.2.9
-
-- Uses the **front camera by default** when opening the barcode scanner.
-- The front/back camera switch remains available.
-
-
-### 0.2.10
-
-- Optimises barcode scanning for Android/Fully Kiosk tablets.
-- Uses **ZXing as the primary decoder on Android** instead of relying on the slower native BarcodeDetector first.
-- Scans only the small barcode guide area instead of processing the complete camera frame.
-- Downscales the scan crop before decoding to reduce CPU load and latency.
-- Uses cropped Native BarcodeDetector as a secondary fallback and the bundled local EAN decoder as the final fallback.
-- Requests a lower-latency 1280×720 / 30 fps camera stream instead of processing 1920×1080 frames.
-- Applies continuous autofocus, exposure and white-balance constraints when the Android camera/WebView exposes those capabilities.
-- Reduces the scan loop delay from 140 ms to 90 ms.
-
-
-### 0.2.11
-
-- Removes the experimental white front-camera fill-light panel.
-- Keeps the visible product order stable while quantities are changed and Home Assistant/AH state refreshes arrive.
-- Restores reliable internal product-list scrolling, including touch scrolling in Android/Fully Kiosk.
-- Simplifies the combined-view header: the source label is no longer shown next to the delivery slot.
-- Shows the delivery date/time on the left below the title.
-- Shows Bonus savings and the article count below the total amount on the right.
-
-
-### 0.2.12
-
-- Replaces the old full-screen scanner dialog with an **inline scanner** inside the existing shopping card.
-- Adds two scanner modes: **Via scan button** replaces the product list temporarily, while **Permanent camera feed** turns a card into a dedicated scanner for side-by-side dashboard layouts.
-- Stops the camera whenever the card is not actually visible: backgrounded browser/app, another Home Assistant route/view, or fully outside the viewport.
-- Clears the recent-scan overlay when leaving the dashboard view so returning starts a fresh scanning session.
-- Makes scanner lifecycle safe across card rerenders and configuration changes so detached video elements cannot keep a camera stream running.
-- Adds **Front / Rear** camera selection in the card editor.
-- Adds configurable **1×–4× zoom**, default **2×**. Hardware zoom is used when available; otherwise the remaining zoom is applied as a centred digital crop.
-- Maps the decoder crop back to the exact visible scan guide, including Home Assistant card aspect ratio, `object-fit: cover` cropping and digital zoom.
-- Keeps ZXing as the fast Android/Fully Kiosk primary decoder and samples the heavier local/native fallbacks only after misses instead of on every frame.
-- Shows up to five recently scanned products over the camera feed at 100%, 80%, 60%, 40% and 20% opacity.
-- Re-scanning the same product updates its quantity and moves it back to the top rather than creating a duplicate overlay row.
-- Uses the same shared product-row renderer for the shopping list and scanner overlay to keep both layouts consistent.
-- Scanner overlay quantity controls can reduce a product all the way to **0**, removing it from Winkelmandje, with `+` available to add it again.
-- Keeps the shopping-list product order stable when quantities change and retains reliable internal/touch scrolling from 0.2.11.
-
-
-### 0.2.13
-
-- Restores the non-permanent scanner auto-close timer: 1:00 initially and 0:05 after a successful scan.
-- Keeps product-list scroll position anchored to the visible product while quantities update.
-- Expands the barcode guide to 90% of the camera width.
-- Removes always-visible scanner/zoom diagnostics; only actionable errors remain visible.
-- Shows the most recently scanned products first in Winkelmandje during the current dashboard session.
-- Registers the dashboard card earlier and makes its frontend bundle self-contained to reduce intermittent `Custom element doesn't exist` load races.
-- Aligns the card header into fixed rows so title/total and subtitle/meta line up consistently.
-- Uses the same compact product-row layout across Winkelmandje, Volgende bestelling, combined view and scanner overlay.
-- Improves desktop/laptop scanning by using ZXing as the primary decoder, requesting up to 1920×1080, retrying a central barcode band and sampling native detection more often.
-- Adds explicit scanner feedback when a barcode was decoded correctly but Albert Heijn has no matching product.
-- Keeps the permanent scanner header synchronized with live Home Assistant entity data instead of remaining at initial placeholder totals.
-
-
-### 0.2.14
-
-- Reads AH fulfillment `reopenable`, `modifiable`, `isAfterCutOff`, `closingDateTime` and transaction state for the next scheduled order.
-- Stops merging scheduled-order products into **Winkelmandje + volgende bestelling** as soon as AH reports `isAfterCutOff: true`.
-- Removes the cut-off order's quantity, price and delivery information from the combined card while keeping the separate **Volgende bestelling** source available as a read-only overview.
-- Adds a card-level barcode decoder selector: **Auto (recommended)**, **ZXing**, **Native BarcodeDetector** or **Local EAN**.
-- Forced decoder modes stay on the selected engine, making it possible to compare scanner performance per device/browser.
-- Shows a clear error when a forced decoder is unavailable instead of silently falling back.
-
-### 0.2.15
-
-- Extends the post-scan auto-close window to 10 seconds.
-- Adds button mode with an initially active camera (`button_auto`).
-- Aligns both header subtitles on the same baseline and prevents long notes from wrapping into the product list.
-
-- Shows estimated Bonus savings for ordered products, including reduced unit prices and supported same-product multibuy offers. Combined view adds the separate cart and order savings; it does not apply promotions across the two sources. AH's order total is never reduced again. The ≈ marker distinguishes the order estimate from an authoritative AH discount total; mix-and-match and unrecognized promotions may be missing.
-- Ignores malformed or unavailable item arrays when rendering the card.
-
-- Uses a short, fixed-pitch synthesized checkout beep after a successful scan (not an official AH audio recording).
-
-### 0.2.16
-
-- Keeps product order stable across quantity changes and AH refreshes in all three list views. Newly scanned products still move to the top intentionally.
-- Updates existing product elements instead of rebuilding the card; preserves the scroll container and focused quantity buttons.
-- Restores the visible row synchronously, with a surviving-row fallback after removal. Removes delayed scroll corrections that could override user scrolling.
-- Adds a Chromium regression test for delayed and reordered updates in shopping-list, combined and order views.
-
-### 0.2.17
-
-- Recognizes spaced multibuy labels such as `1 + 1 gratis`.
-- Rounds each half-price discount to cents before multiplying by the number of pairs.
-- Combines the verified Dr. Oetker Big Americans pizza variants for the `2 voor 5.99` offer. Other distinct products are not grouped by matching offer text alone.
-- Includes discounts already embedded in unit prices in displayed savings without subtracting them twice.
-- Adds `estimated_product_total` and `total_price_difference` to the order entity; retains the original AH `total_price`. Order views display the estimated product total with an ≈ marker, excluding unexplained differences in AH's order amount. Delivery charges, deposits and unsupported or mix-and-match promotions may differ from the amount payable.
-- Regression fixture matches the supplied 29-product example: €59.78 product total, €21.87 savings, €0.25 difference from the €60.03 API order amount.
-
-### 0.2.18
-
-- Re-arms button-auto scanner mode on return to its dashboard route and when the card reconnects. Closing a scanner session stays effective for the current visit; entity updates and scrolling do not reopen it.
-- Removes approximation symbols from the total and Bonus text; the underlying product-total calculation is unchanged.
-- Adds browser coverage for automatic scanner lifecycle and rendering before entity data arrives.
-
-### 0.2.19
-
-- Preserves a successful ZXing central-band result instead of overwriting it with a failed Local EAN fallback on every fourth missed primary frame.
-- Adds a regression test for that decoder handoff. Includes the dashboard revisit and header changes from 0.2.18.
-
-### 0.2.20
-
-- Registers the card as a Lovelace module resource in storage resource mode, so dashboard loading waits for the module. Loads the resource collection before writes and updates only this integration's resource URL when its version changes.
-- YAML resource mode retains the automatic frontend fallback. For explicit YAML loading, list `/ah_shopping/ah-shopping-card.js?v=0.2.20` with `type: module` under Lovelace resources.
-- Adds **Albert Heijn Next Order Bonus Savings**. The existing **Albert Heijn Shopping Bonus Savings** continues to represent only the cart; it correctly becomes zero when the cart has no discounted products.
-
-### 0.2.21
-
-- Auto mode uses locally bundled ZXing-C++ 3.1.5/WebAssembly in a worker; native detection is attempted first when supported. Existing explicit decoders remain available, with a new WebAssembly option.
-- Scans the next available video frame after a miss, with no fixed retry delay. Processing is serialized to avoid a growing frame backlog.
-- Applies a 350 ms cooldown only after a successful AH add, while preventing a held barcode from being added repeatedly.
-- Preserves more image detail and expands to full-camera search after misses, alternating with the guide crop. Detects rotated codes through the C++ reader.
-- Shows immediate barcode-read feedback while the AH lookup/add is in progress.
-- Worker and WASM assets are bundled with their licenses; the main scanning path does not require an external CDN. Legacy Auto fallback retains the existing decoders if worker initialization fails.
-- Browser tests cover local worker loading, standard/rotated/off-center EAN images, blank-image rejection, duplicate protection and immediate-frame/success-cooldown scheduling. Real-camera performance still depends on focus, lighting, motion blur and hardware.
-
-### 0.2.22
-
-- Runs Auto/WebAssembly scans directly through the C++ worker without waiting for browser BarcodeDetector initialization or detection. A stalled browser detector can no longer block that scan route.
-- Schedules each next attempt through requestAnimationFrame instead of depending on video-frame callbacks. No artificial retry delay; the successful-add cooldown remains 350 ms.
-- Bounds worker/native detection requests and recovers to Local EAN after a runtime decoder failure, with a visible error. Releases the busy flag even if read-feedback processing fails.
-- Shows the running card version, decoder and scan counter in the camera view to distinguish a stalled scan loop from unsuccessful recognition.
-- Extends browser tests to cover the complete crop/full-frame scan path, a stalled browser API, worker timeouts, error recovery and callback-independent scheduling.
-
-### 0.2.23
-
-- Extends the cooldown after a successful AH addition to 1.2 seconds. The horizontal scan line is green during this pause and returns to red when scanning resumes.
-- Removes the green border flash, temporary barcode-read message and version/decoder/scanteller overlay. Decoder and AH errors remain visible.
-- Does not count cooldown time as barcode absence. A held barcode remains protected after the pause, while removing it for more than 700 ms allows an intentional rescan. Blocks duplicate additions while an AH request is pending and discards in-flight decoded frames during cooldown.
-- Tests successful-add-only cooldown, green/red scan feedback, held-code protection after the pause, intentional rescans, pending requests and failed additions.
-
-### 0.2.24
-
-- Keeps the last editable quantity at zero for four seconds before deleting the product, with an active plus button to restore it. The row then fades and collapses over 320 ms. Quantity changes and refreshes preserve its position during the undo period.
-- Keeps products already in the order when only their extra cart quantity is removed. Failed deletions restore the row; leaving the dashboard commits outstanding removals.
-- Displays the newest scanned product for ten seconds. When a new scan makes the previous top row translucent, that row gets five seconds; older translucent rows keep their existing deadlines. Plus/minus adjustments restart the current row's ten- or five-second period. Expired feed rows fade and collapse.
-- Updates scanner quantities by patching retained rows/buttons instead of rebuilding the feed, preserving focus, images and running animations.
-- Adds browser coverage for the undo period, smooth height transition, pending writes, undo, errors, ordered-product retention, navigation, feed expiry and unchanged feed nodes during quantity adjustments.
+Licensed under [MIT](LICENSE). Bundled decoder licenses and external dependencies are documented in [third-party notices](THIRD_PARTY_NOTICES.md). Albert Heijn names and logos belong to their respective owners; their inclusion does not imply endorsement.

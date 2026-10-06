@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Installation and troubleshooting
+    url: https://github.com/digital-IMEI/home-assistant-ah-shopping/blob/main/docs/TROUBLESHOOTING.md
+    about: Check common camera, authentication, card-loading and pricing issues first.
