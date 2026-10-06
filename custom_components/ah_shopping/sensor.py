@@ -16,6 +16,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AhShoppingConfigEntry, a
         AhShoppingTotalSensor(coordinator),
         AhShoppingBonusSavingsSensor(coordinator),
         AhNextOrderSensor(order_coordinator),
+        AhNextOrderBonusSavingsSensor(order_coordinator),
     ])
 
 class AhShoppingListSensor(AhShoppingEntity, SensorEntity):
@@ -87,3 +88,20 @@ class AhNextOrderSensor(AhShoppingEntity, SensorEntity):
         return data
 
 
+
+
+class AhNextOrderBonusSavingsSensor(AhShoppingEntity, SensorEntity):
+    """Bonus savings belonging to the scheduled order, separate from the cart."""
+    _attr_name = "Albert Heijn Next Order Bonus Savings"
+    _attr_icon = "mdi:tag-outline"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = CURRENCY_EURO
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_next_order_bonus_savings"
+
+    @property
+    def native_value(self) -> float:
+        return self.coordinator.data.bonus_savings

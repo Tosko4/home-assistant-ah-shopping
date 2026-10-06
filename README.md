@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.19
+## 0.2.20
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -449,3 +449,9 @@ Writes for the same product are serialized inside the integration. Explicit abso
 
 - Preserves a successful ZXing central-band result instead of overwriting it with a failed Local EAN fallback on every fourth missed primary frame.
 - Adds a regression test for that decoder handoff. Includes the dashboard revisit and header changes from 0.2.18.
+
+### 0.2.20
+
+- Registers the card as a Lovelace module resource in storage resource mode, so dashboard loading waits for the module. Loads the resource collection before writes and updates only this integration's resource URL when its version changes.
+- YAML resource mode retains the automatic frontend fallback. For explicit YAML loading, list `/ah_shopping/ah-shopping-card.js?v=0.2.20` with `type: module` under Lovelace resources.
+- Adds **Albert Heijn Next Order Bonus Savings**. The existing **Albert Heijn Shopping Bonus Savings** continues to represent only the cart; it correctly becomes zero when the cart has no discounted products.
