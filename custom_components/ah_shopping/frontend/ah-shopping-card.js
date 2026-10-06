@@ -1,7 +1,48 @@
-import { decodeEANFromImageData, checksumOk } from './ean-decoder.js';
+const EAN_L=["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
+const EAN_G=["0100111","0110011","0011011","0100001","0011101","0111001","0000101","0010001","0001001","0010111"];
+const EAN_R=EAN_L.map(p=>[...p].map(c=>c==="1"?"0":"1").join(""));
+const EAN_PARITY=["LLLLLL","LLGLGG","LLGGLG","LLGGGL","LGLLGG","LGGLLG","LGGGLL","LGLGLG","LGLGGL","LGGLGL"];
+
+function checksumOk(code){
+  if(!/^\d+$/.test(code)||![8,12,13,14].includes(code.length))return false;
+  const digits=[...code].map(Number),check=digits.pop(); let sum=0,weight=3;
+  for(let i=digits.length-1;i>=0;i--){sum+=digits[i]*weight;weight=weight===3?1:3;}
+  return (10-(sum%10))%10===check;
+}
+function eanHamming(a,b){let d=0;for(let i=0;i<a.length;i++)if(a[i]!==b[i])d++;return d;}
+function eanMatchDigit(pattern,sets){let best=null;for(const [type,arr] of sets){for(let d=0;d<10;d++){const dist=eanHamming(pattern,arr[d]);if(best===null||dist<best.dist)best={digit:d,type,dist};}}return best&&best.dist<=1?best:null;}
+function eanGuardOk(s,expected){return s.length===expected.length&&eanHamming(s,expected)<=1;}
+function eanDecodeModules(modules){
+  const value=modules.join("");
+  if(value.length===95&&eanGuardOk(value.slice(0,3),"101")&&eanGuardOk(value.slice(45,50),"01010")&&eanGuardOk(value.slice(92),"101")){
+    let left="",parity="",right="";
+    for(let i=0;i<6;i++){const m=eanMatchDigit(value.slice(3+i*7,10+i*7),[["L",EAN_L],["G",EAN_G]]);if(!m)return null;left+=m.digit;parity+=m.type;}
+    const first=EAN_PARITY.indexOf(parity);if(first<0)return null;
+    for(let i=0;i<6;i++){const m=eanMatchDigit(value.slice(50+i*7,57+i*7),[["R",EAN_R]]);if(!m)return null;right+=m.digit;}
+    const code=`${first}${left}${right}`;return checksumOk(code)?code:null;
+  }
+  if(value.length===67&&eanGuardOk(value.slice(0,3),"101")&&eanGuardOk(value.slice(31,36),"01010")&&eanGuardOk(value.slice(64),"101")){
+    let code="";
+    for(let i=0;i<4;i++){const m=eanMatchDigit(value.slice(3+i*7,10+i*7),[["L",EAN_L]]);if(!m)return null;code+=m.digit;}
+    for(let i=0;i<4;i++){const m=eanMatchDigit(value.slice(36+i*7,43+i*7),[["R",EAN_R]]);if(!m)return null;code+=m.digit;}
+    return checksumOk(code)?code:null;
+  }
+  return null;
+}
+function eanPercentiles(values){const sorted=[...values].sort((a,b)=>a-b);return [sorted[Math.floor(sorted.length*.1)],sorted[Math.floor(sorted.length*.9)]];}
+function eanBinarize(values){const [lo,hi]=eanPercentiles(values);if(hi-lo<35)return null;const t=(lo+hi)/2;return values.map(v=>v<t?1:0);}
+function eanRuns(bits){const out=[];let value=bits[0],start=0;for(let i=1;i<=bits.length;i++){if(i===bits.length||bits[i]!==value){out.push({value,start,len:i-start});if(i<bits.length){value=bits[i];start=i;}}}return out;}
+function eanSample(bits,start,moduleWidth,count){const result=[];for(let i=0;i<count;i++){const a=Math.max(0,Math.floor(start+i*moduleWidth)),b=Math.min(bits.length,Math.ceil(start+(i+1)*moduleWidth));if(b<=a)return null;let ones=0;for(let x=a;x<b;x++)ones+=bits[x];result.push(ones/(b-a)>.5?"1":"0");}return result;}
+function eanTryRuns(bits,count){const rs=eanRuns(bits);for(let i=0;i<rs.length-2;i++){if(rs[i].value!==1||rs[i+1].value!==0||rs[i+2].value!==1)continue;const lens=[rs[i].len,rs[i+1].len,rs[i+2].len],min=Math.min(...lens),max=Math.max(...lens);if(min<1||max/min>2)continue;const base=(lens[0]+lens[1]+lens[2])/3;for(const scale of [.90,.94,.97,1,1.03,1.06,1.10]){const w=base*scale;if(rs[i].start+w*count>bits.length)continue;const modules=eanSample(bits,rs[i].start,w,count);if(!modules)continue;const code=eanDecodeModules(modules);if(code)return code;}}return null;}
+function eanDecodeRow(values){const bits=eanBinarize(values);if(!bits)return null;return eanTryRuns(bits,95)||eanTryRuns(bits,67)||eanTryRuns([...bits].reverse(),95)||eanTryRuns([...bits].reverse(),67);}
+function decodeEANFromImageData(imageData){
+  const {data,width,height}=imageData,rows=[.30,.38,.46,.50,.54,.62,.70].map(v=>Math.max(0,Math.min(height-1,Math.floor(height*v))));
+  for(const y of rows){const values=[];for(let x=0;x<width;x++){const p=(y*width+x)*4;values.push(.299*data[p]+.587*data[p+1]+.114*data[p+2]);}const code=eanDecodeRow(values);if(code)return code;}
+  return null;
+}
 
 class AhShoppingCard extends HTMLElement {
-  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
+  constructor(){super(); this.attachShadow({mode:'open'}); this._config={}; this._hass=null; this._listScrollTop=0; this._scanner=null; this._scanLoop=null; this._facing='user'; this._message=''; this._lastEntitySig=null; this._barcodeDetector=null; this._zxingReader=null; this._decoderMode='local'; this._cameraInfo=''; this._scanCount=0; this._scanBusy=false; this._scanProcessing=false; this._scanQueue=[]; this._heldBarcode=''; this._heldBarcodeLastSeen=0; this._audioContext=null; this._scanProduct=null; this._scanPendingQty=new Map(); this._scanQtyWorkers=new Map(); this._pendingQty=new Map(); this._qtyWorkers=new Map(); this._stableItemOrder=new Map(); this._stableItemSeq=0; this._scanInlineActive=false; this._scanRecent=[]; this._intersecting=false; this._visibilityObserver=null; this._visibilitySetup=false; this._cameraStarting=false; this._digitalZoom=1; this._nativeZoom=1; this._decoderMisses=0; this._scannerRoute=''; this._scanTimer=null; this._scanTimerTick=null; this._scanDeadline=0; this._listScrollAnchor=null; this._visibilityHandler=()=>this._syncScannerVisibility(); this._locationHandler=()=>requestAnimationFrame(()=>this._handleLocationChange());}
   static getStubConfig(){return {show_header:true,show_scan:true,show_products:true,product_source:'shopping_list',scanner_mode:'button',scan_camera:'front',scan_zoom:2};}
   static getConfigForm(){return {schema:[
     {name:'entity',selector:{entity:{domain:'sensor'}}},
@@ -52,6 +93,7 @@ class AhShoppingCard extends HTMLElement {
     this._facing=this._config.scan_camera==='rear'?'environment':'user';
 
     if(this._config.scanner_mode==='permanent'){
+      this._clearScannerTimer();
       this._scanInlineActive=true;
     }else if(previousMode==='permanent'){
       this._scanInlineActive=false;
@@ -231,13 +273,54 @@ class AhShoppingCard extends HTMLElement {
   }
 
   _toast(msg,error=false){this._message=msg;this._messageError=error;this._render();clearTimeout(this._msgTimer);this._msgTimer=setTimeout(()=>{this._message='';this._render();},2800);}
+
+  _rowDomKey(item){
+    const productId=Number(item?.product_id||item?.id||0);
+    if(productId>0)return `p:${productId}`;
+    const rawId=item?.item_id??item?.list_item_id??'';
+    if(rawId)return `i:${rawId}`;
+    return `t:${String(item?.title||item?.description||'').trim().toLowerCase()}`;
+  }
+
+  _captureListScroll(){
+    const list=this.shadowRoot?.querySelector('.items');
+    if(!list)return;
+    this._listScrollTop=list.scrollTop;
+    const listRect=list.getBoundingClientRect();
+    const rows=[...list.querySelectorAll('[data-row-key]')];
+    const anchor=rows.find(row=>row.getBoundingClientRect().bottom>listRect.top+1);
+    this._listScrollAnchor=anchor
+      ? {key:anchor.dataset.rowKey,offset:anchor.getBoundingClientRect().top-listRect.top}
+      : null;
+  }
+
+  _restoreListScroll(){
+    const list=this.shadowRoot?.querySelector('.items');
+    if(!list)return;
+    const anchorState=this._listScrollAnchor;
+    const restore=()=>{
+      if(!list.isConnected)return;
+      list.scrollTop=this._listScrollTop;
+      if(anchorState){
+        const row=[...list.querySelectorAll('[data-row-key]')].find(el=>el.dataset.rowKey===anchorState.key);
+        if(row){
+          const delta=(row.getBoundingClientRect().top-list.getBoundingClientRect().top)-anchorState.offset;
+          if(Math.abs(delta)>.5)list.scrollTop+=delta;
+        }
+      }
+      this._listScrollTop=list.scrollTop;
+    };
+    restore();
+    requestAnimationFrame(()=>{restore();requestAnimationFrame(restore);});
+    list.addEventListener('scroll',()=>{this._listScrollTop=list.scrollTop;},{passive:true});
+  }
+
   _render(){
     if(!this.shadowRoot)return;
 
     if(this._stream)this._stopCamera();
 
-    const oldList=this.shadowRoot.querySelector('.items');
-    if(oldList)this._listScrollTop=oldList.scrollTop;
+    this._captureListScroll();
 
     const view=this._viewData();
     const entity=view.entity;
@@ -259,7 +342,7 @@ class AhShoppingCard extends HTMLElement {
     const totalMeta=[view.bonus_savings? `Bonus −${this._money(view.bonus_savings)}`:'',articleText].filter(Boolean).join(' · ');
 
     const header=showHeader
-      ? `<div class="head"><div class="headLeft"><div class="title">${this._esc(title)}</div><div class="sub">${this._esc(leftNote)}</div></div><div class="total">${this._money(view.total_price||0)}<small>${this._esc(totalMeta)}</small></div></div>`
+      ? `<div class="head"><div class="title">${this._esc(title)}</div><div class="total">${this._money(view.total_price||0)}</div><div class="sub headerSub">${this._esc(leftNote)}</div><div class="headerMeta">${this._esc(totalMeta)}</div></div>`
       : '';
     const scan=showScan&&!scannerActive
       ? `<div class="scanArea"><ha-button id="scan" class="scanWide" appearance="filled"><ha-icon icon="mdi:barcode-scan" slot="start"></ha-icon>${this._esc(scanLabel)}</ha-button></div>`
@@ -276,8 +359,7 @@ class AhShoppingCard extends HTMLElement {
     this.shadowRoot.querySelectorAll('[data-plus]').forEach(el=>el.addEventListener('click',()=>this._adjustQuantity(el.dataset.source,Number(el.dataset.pid),Number(el.dataset.qty),1)));
     this.shadowRoot.querySelectorAll('[data-remove]').forEach(el=>el.addEventListener('click',()=>this._remove(el.dataset.source,Number(el.dataset.pid))));
 
-    const list=this.shadowRoot.querySelector('.items');
-    if(list)list.scrollTop=this._listScrollTop;
+    this._restoreListScroll();
 
     if(scannerActive){
       this._scanner=this.shadowRoot.querySelector('#inlineScanner');
@@ -297,14 +379,15 @@ class AhShoppingCard extends HTMLElement {
       <div class="scanGuide"></div>
       <div id="scanRecent" class="scanRecent ${permanent?'':'withClose'}"></div>
       ${permanent?'':`<button id="scanClose" class="scanClose" aria-label="Sluit scanner">×</button>`}
-      <div class="scanHud">
+      <div class="scanHud ${permanent?'':'timed'}">
         <span id="scanstatus" class="scanPill">Scanner starten…</span>
+        ${permanent?'':`<span id="scanTimer" class="scanPill scanTimer">Auto sluiten · 1:00</span>`}
         <span id="scanmeta" class="scanPill">${camera} · ${zoom}×</span>
       </div>
     </div>`;
   }
 
-  _productRow(i,{controls='',compact=false,rowClass='',style='',metaHtml=null}={}){
+  _productRow(i,{controls='',compact=false,rowClass='',style='',metaHtml=null,rowKey=''}={}){
     const image=i.image_url
       ? `<img src="${this._esc(i.image_url)}" alt="">`
       : '<div class="ph">🛒</div>';
@@ -316,7 +399,8 @@ class AhShoppingCard extends HTMLElement {
       : `<small>${this._esc(i.unit_size||'')}</small>${price}${bonus}`;
     const classes=['item',compact?'compactItem':'',rowClass].filter(Boolean).join(' ');
     const styleAttr=style?` style="${style}"`:'';
-    return `<div class="${classes}"${styleAttr}>${image}<div class="info"><b>${this._esc(i.title||i.description||'Product')}</b>${details}</div>${controls}</div>`;
+    const keyAttr=rowKey?` data-row-key="${this._esc(rowKey)}"`:'';
+    return `<div class="${classes}"${styleAttr}${keyAttr}>${image}<div class="info"><b>${this._esc(i.title||i.description||'Product')}</b>${details}</div>${controls}</div>`;
   }
 
   _item(i,editSource=null,combined=false){
@@ -339,13 +423,13 @@ class AhShoppingCard extends HTMLElement {
       const controls=i.product_id>0
         ? `<div class="qty compactQty combinedQty">${shoppingQty>0?`<button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${shoppingQty}" aria-label="Verlaag totaal">−</button>`:''}<span title="${orderQty} besteld + ${shoppingQty} winkelmandje">${totalQty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${shoppingQty}" aria-label="Voeg toe aan winkelmandje">+</button></div>`
         : `<div class="qty readonlyQty"><span>${totalQty}×</span></div>`;
-      return this._productRow(i,{controls,compact:true,metaHtml:meta});
+      return this._productRow(i,{controls,compact:true,metaHtml:meta,rowKey:this._rowDomKey(i)});
     }
 
     const controls=editSource&&i.product_id>0
       ? `<div class="qty"><button data-minus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}">−</button><span>${displayQty}</span><button data-plus data-source="${editSource}" data-pid="${i.product_id}" data-qty="${displayQty}">+</button><button class="trash" data-remove data-source="${editSource}" data-pid="${i.product_id}">×</button></div>`
       : `<div class="qty"><span>${displayQty}×</span></div>`;
-    return this._productRow(i,{controls});
+    return this._productRow(i,{controls,rowKey:this._rowDomKey(i)});
   }
 
   _openScanner(){
@@ -363,6 +447,38 @@ class AhShoppingCard extends HTMLElement {
     this._scannerRoute=this._routeKey();
     this._scanInlineActive=true;
     this._render();
+    this._armScannerTimer(60000);
+  }
+
+  _armScannerTimer(ms){
+    if(this._config.scanner_mode==='permanent')return;
+    this._clearScannerTimer();
+    this._scanDeadline=Date.now()+ms;
+    this._updateScannerTimer();
+    this._scanTimerTick=setInterval(()=>this._updateScannerTimer(),250);
+    this._scanTimer=setTimeout(()=>{
+      if(this._scanProcessing||this._scanQueue.length){
+        this._armScannerTimer(1000);
+        return;
+      }
+      this._closeScanner();
+    },ms);
+  }
+
+  _updateScannerTimer(){
+    const el=this._scanner?.querySelector('#scanTimer');
+    if(!el||!this._scanDeadline)return;
+    const seconds=Math.max(0,Math.ceil((this._scanDeadline-Date.now())/1000));
+    const minutes=Math.floor(seconds/60);
+    el.textContent=`Auto sluiten · ${minutes}:${String(seconds%60).padStart(2,'0')}`;
+  }
+
+  _clearScannerTimer(){
+    clearTimeout(this._scanTimer);
+    clearInterval(this._scanTimerTick);
+    this._scanTimer=null;
+    this._scanTimerTick=null;
+    this._scanDeadline=0;
   }
 
   _armScanAudio(){
@@ -749,6 +865,7 @@ class AhShoppingCard extends HTMLElement {
         this._pulseScanner();
         this._renderScanResult();
         this._setScanStatus('Scanner actief');
+        if(this._config.scanner_mode!=='permanent')this._armScannerTimer(5000);
       }catch(e){
         this._setScanStatus(e.message||String(e),true);
       }
@@ -852,6 +969,7 @@ class AhShoppingCard extends HTMLElement {
 
   _closeScanner(){
     if(this._config.scanner_mode==='permanent')return;
+    this._clearScannerTimer();
     this._scanQueue=[];
     this._stopCamera();
     this._scanner=null;
@@ -953,6 +1071,7 @@ class AhShoppingCard extends HTMLElement {
   }
 
   disconnectedCallback(){
+    this._clearScannerTimer();
     document.removeEventListener('visibilitychange',this._visibilityHandler);
     window.removeEventListener('location-changed',this._locationHandler);
     this._visibilityObserver?.disconnect();
@@ -965,7 +1084,7 @@ class AhShoppingCard extends HTMLElement {
     this._clearScanSession();
   }
 
-  _css(){return `:host{display:block;height:100%;min-height:0;overflow:hidden}ha-card{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}.fullCard{height:100%;min-height:0;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:18px 18px 12px}.headLeft{min-width:0;flex:1 1 auto}.title{font-size:20px;font-weight:700}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px;margin-top:3px}.total{flex:0 0 auto;text-align:right;font-size:21px;font-weight:700}.total small{font-weight:400;white-space:nowrap}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.combinedBreakdown{font-size:10px;color:var(--secondary-text-color);white-space:nowrap}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.combinedQty span{font-size:13px;font-weight:700;min-width:22px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.inlineScanner{position:relative;flex:1 1 0;min-height:0;width:100%;overflow:hidden;background:#000}.inlineScanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transform-origin:center center;will-change:transform}.scanGuide{position:absolute;z-index:2;left:20%;right:20%;top:40%;height:20%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}.scanGuide:after{content:'';position:absolute;left:7%;right:7%;top:50%;height:2px;background:#f33}.scanRecent{position:absolute;z-index:4;top:10px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px;max-height:78%;overflow:hidden;pointer-events:none}.scanRecent.withClose{right:58px}.scanOverlayItem{pointer-events:auto;background:var(--card-background-color);border:0!important;border-radius:10px;box-shadow:0 2px 10px #0005;animation:scanRowIn .18s ease-out}.scanOverlayItem .compactMeta{min-height:14px}.scanOverlayItem .qty button{background:var(--secondary-background-color)}.scanClose{position:absolute;z-index:6;top:10px;right:10px;width:38px;height:38px;padding:0;border-radius:50%;background:#0009;color:#fff;font-size:24px;line-height:38px;backdrop-filter:blur(4px)}.scanHud{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;pointer-events:none}.scanPill{display:inline-block;max-width:70%;padding:5px 8px;border-radius:999px;background:#0009;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px)}.scanPill.error{background:var(--error-color,#c62828)}.inlineScanner.scanHit:after{content:'';position:absolute;z-index:3;inset:0;border:3px solid #00a03c;box-shadow:inset 0 0 28px #00a03c88;pointer-events:none;animation:scanFlash .22s ease-out}@keyframes scanFlash{from{opacity:1}to{opacity:0}}@keyframes scanRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0)}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.scanOverlayItem{grid-template-columns:42px minmax(0,1fr) auto}.scanOverlayItem .qty{grid-column:auto;justify-content:flex-end}.scanOverlayItem img,.scanOverlayItem .ph{width:38px;height:38px}.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
+  _css(){return `:host{display:block;height:100%;min-height:0;overflow:hidden}ha-card{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}.fullCard{height:100%;min-height:0;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;column-gap:16px;row-gap:7px;align-items:baseline;padding:18px 18px 12px}.title{grid-column:1;grid-row:1;min-width:0;font-size:20px;font-weight:700;line-height:1.2}.total{grid-column:2;grid-row:1;text-align:right;font-size:21px;font-weight:700;line-height:1.2}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px}.headerSub{grid-column:1;grid-row:2;margin:0;line-height:1.25}.headerMeta{grid-column:2;grid-row:2;text-align:right;color:var(--secondary-text-color);font-size:12px;line-height:1.25;white-space:nowrap}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.combinedBreakdown{font-size:10px;color:var(--secondary-text-color);white-space:nowrap}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.combinedQty span{font-size:13px;font-weight:700;min-width:22px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.inlineScanner{position:relative;flex:1 1 0;min-height:0;width:100%;overflow:hidden;background:#000}.inlineScanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transform-origin:center center;will-change:transform}.scanGuide{position:absolute;z-index:2;left:5%;right:5%;top:40%;height:20%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}.scanGuide:after{content:'';position:absolute;left:7%;right:7%;top:50%;height:2px;background:#f33}.scanRecent{position:absolute;z-index:4;top:10px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px;max-height:78%;overflow:hidden;pointer-events:none}.scanRecent.withClose{right:58px}.scanOverlayItem{pointer-events:auto;background:var(--card-background-color);border:0!important;border-radius:10px;box-shadow:0 2px 10px #0005;animation:scanRowIn .18s ease-out}.scanOverlayItem .compactMeta{min-height:14px}.scanOverlayItem .qty button{background:var(--secondary-background-color)}.scanClose{position:absolute;z-index:6;top:10px;right:10px;width:38px;height:38px;padding:0;border-radius:50%;background:#0009;color:#fff;font-size:24px;line-height:38px;backdrop-filter:blur(4px)}.scanHud{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:8px;pointer-events:none}.scanHud.timed{grid-template-columns:minmax(0,1fr) auto auto}.scanPill{display:inline-block;max-width:70%;padding:5px 8px;border-radius:999px;background:#0009;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px)}.scanTimer{max-width:none}.scanPill.error{background:var(--error-color,#c62828)}.inlineScanner.scanHit:after{content:'';position:absolute;z-index:3;inset:0;border:3px solid #00a03c;box-shadow:inset 0 0 28px #00a03c88;pointer-events:none;animation:scanFlash .22s ease-out}@keyframes scanFlash{from{opacity:1}to{opacity:0}}@keyframes scanRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0)}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.scanOverlayItem{grid-template-columns:42px minmax(0,1fr) auto}.scanOverlayItem .qty{grid-column:auto;justify-content:flex-end}.scanOverlayItem img,.scanOverlayItem .ph{width:38px;height:38px}.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
 }
 if(!customElements.get('ah-shopping-card'))customElements.define('ah-shopping-card',AhShoppingCard);
 window.customCards=window.customCards||[];
