@@ -381,14 +381,23 @@ class AhShoppingApiClient:
         code = "".join(ch for ch in barcode if ch.isdigit())
         if len(code) not in (8, 12, 13, 14):
             raise AhRequestError("Barcode must be EAN-8, UPC-A, EAN-13 or GTIN-14")
-        raw = await self._raw_request(
-            "GET", f"/mobile-services/product/search/v1/gtin/{quote(code, safe='')}"
-        )
+        try:
+            raw = await self._raw_request(
+                "GET", f"/mobile-services/product/search/v1/gtin/{quote(code, safe='')}"
+            )
+        except AhNotFoundError as err:
+            raise AhNotFoundError(
+                f"Barcode {code} was read correctly, but no product was found at Albert Heijn"
+            ) from err
         if not isinstance(raw, dict):
-            raise AhNotFoundError("No AH product found for this barcode")
+            raise AhNotFoundError(
+                f"Barcode {code} was read correctly, but no product was found at Albert Heijn"
+            )
         product = Product.from_api(raw)
         if product.id <= 0:
-            raise AhNotFoundError("No AH product found for this barcode")
+            raise AhNotFoundError(
+                f"Barcode {code} was read correctly, but no product was found at Albert Heijn"
+            )
         return product
 
     async def async_write_list_item(
