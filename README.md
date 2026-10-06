@@ -89,6 +89,36 @@ scan_label: Scan product
 
 Existing cards using `mode: scan_only` remain compatible.
 
+### Scanner modes
+
+The scanner is part of the same `custom:ah-shopping-card`.
+
+Default/on-demand mode keeps the normal shopping card visible. Pressing **Scan product** replaces the product list with the live camera feed until the scanner is closed:
+
+```yaml
+type: custom:ah-shopping-card
+product_source: shopping_list_and_order
+scanner_mode: button
+scan_camera: front
+scan_zoom: 2
+```
+
+For a dedicated scanner card next to a separate shopping-list card, use permanent mode:
+
+```yaml
+type: custom:ah-shopping-card
+scanner_mode: permanent
+scan_camera: front
+scan_zoom: 2
+show_header: false
+```
+
+The permanent feed only runs while the card is actually visible: the browser/app must be in the foreground, the dashboard view must be active and the card must intersect the visible viewport. Leaving the view, hiding the app or scrolling the card fully out of view stops the camera stream; returning restarts it.
+
+The feed always fills the Home Assistant-assigned card size and stays centered using a cover-style crop, without imposing its own aspect ratio. `scan_zoom` supports 1× to 4× and defaults to 2×. Hardware camera zoom is used when exposed by the browser/WebView; any remaining zoom is applied as a centered digital crop. `scan_camera` can be `front` or `rear`.
+
+Up to five recently scanned products are shown as rows over the video feed. The newest row is fully opaque; older rows fade to 80%, 60%, 40% and 20%. Scanning the same product again updates its quantity and moves that product back to the top instead of creating a duplicate row. The overlay quantity controls write to Winkelmandje and can reduce an item all the way to zero.
+
 ### Test barcode
 
 For a quick camera test, use EAN-13 `8710400169468` (AH Biologisch Halfvolle melk 1 l at the time of writing).
