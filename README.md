@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.15
+## 0.2.16
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -422,3 +422,10 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Ignores malformed or unavailable item arrays when rendering the card.
 
 - Uses a short, fixed-pitch synthesized checkout beep after a successful scan (not an official AH audio recording).
+
+### 0.2.16
+
+- Keeps product order stable across quantity changes and AH refreshes in all three list views. Newly scanned products still move to the top intentionally.
+- Updates existing product elements instead of rebuilding the card; preserves the scroll container and focused quantity buttons.
+- Restores the visible row synchronously, with a surviving-row fallback after removal. Removes delayed scroll corrections that could override user scrolling.
+- Adds a Chromium regression test for delayed and reordered updates in shopping-list, combined and order views.
