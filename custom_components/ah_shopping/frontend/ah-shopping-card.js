@@ -109,10 +109,19 @@ class AhShoppingCard extends HTMLElement {
     this._hass=hass;
     const entities=[this._entity(),this._orderEntity()].filter(Boolean);
     const sig=entities.map(e=>`${e.entity_id}|${e.last_updated}`).join(';')||'none';
+
+    // A permanent scanner can be rendered before HA entities are available.
+    // Keep its header bound to live entity data on every hass update so it
+    // cannot remain stuck at the initial zero/empty placeholder values.
+    if(this._scanner){
+      this._lastEntitySig=sig;
+      this._updateHeaderOnly();
+      return;
+    }
+
     if(sig!==this._lastEntitySig){
       this._lastEntitySig=sig;
-      if(this._scanner)this._updateHeaderOnly();
-      else this._render();
+      this._render();
     }
   }
   getCardSize(){
@@ -343,7 +352,13 @@ class AhShoppingCard extends HTMLElement {
     const view=this._viewData();
     const items=view.items||[];
     const title=this._config.title||view.label;
+    const sourceAvailable=Boolean(view.entity);
     const syncText=view.pending_changes? ` · ${view.pending_changes} wijziging${view.pending_changes===1?'':'en'} bezig` : '';
+
+    if(!sourceAvailable){
+      return {view,title,leftNote:'',totalMeta:'',total:'—'};
+    }
+
     const articleCount=Number(view.unique_items??items.length);
     const articleText=`${articleCount} ${articleCount===1?'artikel':'artikelen'}`;
     const leftNote=view.delivery
