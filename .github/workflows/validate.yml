@@ -44,4 +44,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: hacs/action@main
-        with: {category: integration}
+        with:
+          category: integration
+          # These two checks validate GitHub "About" metadata, not integration files.
+          # The repository is used as a custom HACS repository; code/manifest checks remain enabled.
+          ignore: description topics
