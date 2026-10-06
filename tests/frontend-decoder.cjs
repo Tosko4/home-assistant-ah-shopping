@@ -161,12 +161,14 @@ const server=http.createServer((req,res)=>{
    let frame=1;
    Object.defineProperties(canvas,{readyState:{value:4},videoWidth:{value:400},videoHeight:{value:100},currentTime:{value:1}});
    canvas.getVideoPlaybackQuality=()=>({totalVideoFrames:frame});
-   c._scanner={querySelector:()=>canvas};c._stream={};c._shouldScannerRun=()=>true;c._scheduleScan=()=>{};
+   c._scanner={querySelector:selector=>selector==='video'?canvas:null};c._stream={};c._shouldScannerRun=()=>true;c._scheduleScan=()=>{};
    c._scanCanvas=document.createElement('canvas');c._decoderMode='wasm';let attempts=0;
    c._decodeWasm=async()=>{attempts++;return '';};
+   const originalClock=performance.now;let clock=100;performance.now=()=>clock;
    await c._scanFrame();await c._scanFrame();const repeatedSkipped=attempts===1;
    frame++;await c._scanFrame();const newFrameImmediate=attempts===2;
-   c._lastScanFrameAt-=81;await c._scanFrame();const frozenRecovers=attempts===3;
+   clock+=81;await c._scanFrame();const frozenRecovers=attempts===3;
+   performance.now=originalClock;
    return {repeatedSkipped,newFrameImmediate,frozenRecovers};
   });
   for(const [key,value] of Object.entries(frames))assert.equal(value,true,key);
