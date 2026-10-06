@@ -203,3 +203,15 @@ def test_next_order_cutoff_metadata_serializes():
     assert payload["is_after_cut_off"] is True
     assert payload["closing_date_time"] == "2026-10-06T09:00:00+02:00"
 
+
+
+def test_order_bonus_estimate_does_not_reduce_ah_total():
+    from custom_components.ah_shopping.models import NextOrderItem, NextOrderData
+    pair = NextOrderItem(1, "Pair", 4, price_now=2.89, is_bonus=True, bonus_mechanism="2e HALVE PRIJS")
+    reduced = NextOrderItem(2, "Reduced", 3, price_now=2, price_was=3, is_bonus=True)
+    order = NextOrderData(total_price=14.67, items=(pair, reduced))
+    assert pair.bonus_savings == 2.89
+    assert reduced.bonus_savings == 3
+    assert order.as_dict()["bonus_savings"] == 5.89
+    assert order.as_dict()["total_price"] == 14.67
+    assert order.as_dict()["bonus_savings_estimated"] is True

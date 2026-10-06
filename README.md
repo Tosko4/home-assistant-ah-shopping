@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.14
+## 0.2.15
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -106,6 +106,8 @@ scan_camera: front
 scan_zoom: 2
 scan_decoder: auto
 ```
+
+Use `scanner_mode: button_auto` (**Via scan button — start active**) to open the camera when the card loads, then return to the list after scanning. Both button modes close after 60 seconds without a scan, or 10 seconds after the last successful scan. Use the scan button to start another session. The permanent feed does not auto-close.
 
 For a dedicated scanner card next to a separate shopping-list card, use permanent mode:
 
@@ -409,3 +411,14 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Adds a card-level barcode decoder selector: **Auto (recommended)**, **ZXing**, **Native BarcodeDetector** or **Local EAN**.
 - Forced decoder modes stay on the selected engine, making it possible to compare scanner performance per device/browser.
 - Shows a clear error when a forced decoder is unavailable instead of silently falling back.
+
+### 0.2.15
+
+- Extends the post-scan auto-close window to 10 seconds.
+- Adds button mode with an initially active camera (`button_auto`).
+- Aligns both header subtitles on the same baseline and prevents long notes from wrapping into the product list.
+
+- Shows estimated Bonus savings for ordered products, including reduced unit prices and supported same-product multibuy offers. Combined view adds the separate cart and order savings; it does not apply promotions across the two sources. AH's order total is never reduced again. The ≈ marker distinguishes the order estimate from an authoritative AH discount total; mix-and-match and unrecognized promotions may be missing.
+- Ignores malformed or unavailable item arrays when rendering the card.
+
+- Uses a short, fixed-pitch synthesized checkout beep after a successful scan (not an official AH audio recording).

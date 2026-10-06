@@ -296,6 +296,18 @@ class NextOrderItem:
     def line_total(self) -> float:
         return round(self.price_now * self.quantity, 2)
 
+    @property
+    def bonus_savings(self) -> float:
+        """Estimate savings from order product metadata, never alter AH's total."""
+        product = Product(
+            id=self.product_id, title=self.title, price_now=self.price_now,
+            price_was=self.price_was, is_bonus=self.is_bonus,
+            bonus_mechanism=self.bonus_mechanism,
+        )
+        embedded = max(0.0, self.price_was - self.price_now) * max(0, self.quantity)
+        multibuy = ShoppingItem("", self.product_id, self.quantity, product=product).bonus_savings
+        return round(embedded + multibuy, 2)
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "product_id": self.product_id,
@@ -310,6 +322,7 @@ class NextOrderItem:
             "taxonomy": self.taxonomy,
             "image_url": self.image_url,
             "line_total": self.line_total,
+            "bonus_savings": self.bonus_savings,
         }
 
 
@@ -340,6 +353,10 @@ class NextOrderData:
     def unique_items(self) -> int:
         return len(self.items)
 
+    @property
+    def bonus_savings(self) -> float:
+        return round(sum(item.bonus_savings for item in self.items), 2)
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "order_id": self.order_id,
@@ -357,6 +374,8 @@ class NextOrderData:
             "delivery_start_time": self.delivery_start_time,
             "delivery_end_time": self.delivery_end_time,
             "total_price": round(self.total_price, 2),
+            "bonus_savings": self.bonus_savings,
+            "bonus_savings_estimated": True,
             "total_quantity": self.total_quantity,
             "unique_items": self.unique_items,
             "items": [item.as_dict() for item in self.items],

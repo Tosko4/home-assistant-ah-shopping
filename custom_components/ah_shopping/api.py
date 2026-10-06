@@ -300,7 +300,7 @@ class AhShoppingApiClient:
                             unit_size=str(product.get("salesUnitSize") or ""),
                             price_now=current,
                             price_was=before,
-                            is_bonus=bool(product.get("isBonus")),
+                            is_bonus=parsed_product.is_bonus,
                             bonus_mechanism=str(product.get("bonusMechanism") or ""),
                             taxonomy=taxonomy,
                             image_url=parsed_product.image_url,

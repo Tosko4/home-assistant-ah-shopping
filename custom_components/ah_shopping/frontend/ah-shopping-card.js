@@ -51,6 +51,7 @@ class AhShoppingCard extends HTMLElement {
     {name:'show_products',selector:{boolean:{}}},
     {name:'scanner_mode',selector:{select:{options:[
       {value:'button',label:'Via scan button'},
+      {value:'button_auto',label:'Via scan button — start active'},
       {value:'permanent',label:'Permanent camera feed'}
     ]}}},
     {name:'scan_camera',selector:{select:{options:[
@@ -102,7 +103,10 @@ class AhShoppingCard extends HTMLElement {
     if(this._config.scanner_mode==='permanent'){
       this._clearScannerTimer();
       this._scanInlineActive=true;
-    }else if(previousMode==='permanent'){
+    }else if(this._config.scanner_mode==='button_auto'&&previousMode!=='button_auto'){
+      this._clearScannerTimer();
+      this._scanInlineActive=true;
+    }else if(previousMode==='permanent'||previousMode==='button_auto'&&this._config.scanner_mode!=='button_auto'){
       this._scanInlineActive=false;
       this._scannerRoute='';
       this._clearScanSession();
@@ -167,7 +171,7 @@ class AhShoppingCard extends HTMLElement {
     return `${scope}:${key}`;
   }
   _stableItems(items,scope){
-    const rows=[...(items||[])];
+    const rows=Array.isArray(items)?items.filter(i=>i&&typeof i==='object'):[];
     for(const item of rows){
       const key=this._stableItemKey(item,scope);
       if(!this._stableItemOrder.has(key)){
@@ -187,7 +191,7 @@ class AhShoppingCard extends HTMLElement {
   }
 
   _chronologicalShoppingItems(items){
-    return [...(items||[])].sort((a,b)=>{
+    return (Array.isArray(items)?items.filter(i=>i&&typeof i==='object'):[]).sort((a,b)=>{
       const aSeq=this._scanOrderState.products.get(Number(a?.product_id||a?.id||0))||0;
       const bSeq=this._scanOrderState.products.get(Number(b?.product_id||b?.id||0))||0;
       return bSeq-aSeq;
@@ -225,8 +229,8 @@ class AhShoppingCard extends HTMLElement {
       item.quantity=item.shopping_quantity+item.order_quantity;
     };
 
-    for(const raw of listItems||[])add(raw,'shopping');
-    for(const raw of orderItems||[])add(raw,'order');
+    for(const raw of Array.isArray(listItems)?listItems.filter(Boolean):[])add(raw,'shopping');
+    for(const raw of Array.isArray(orderItems)?orderItems.filter(Boolean):[])add(raw,'order');
     return [...map.values()];
   }
   _viewData(){
@@ -239,6 +243,8 @@ class AhShoppingCard extends HTMLElement {
         items:this._stableItems(order.items||[],'next_order'),
         total_quantity:order.total_quantity||0,
         total_price:order.total_price||0,
+        bonus_savings:order.bonus_savings||0,
+        bonus_savings_estimated:order.bonus_savings_estimated===true,
         unique_items:order.unique_items||0,
         label:'Volgende bestelling',
         edit_source:null,
@@ -263,7 +269,8 @@ class AhShoppingCard extends HTMLElement {
         entity:this._entity()||(includeOrder?this._orderEntity():null),
         delivery:includeOrder?(order.delivery_date_display||order.delivery_date||''):'',
         time:includeOrder?(order.delivery_time_display||''):'',
-        bonus_savings:list.bonus_savings||0,
+        bonus_savings:Number(list.bonus_savings||0)+(includeOrder?Number(order.bonus_savings||0):0),
+        bonus_savings_estimated:includeOrder&&order.bonus_savings_estimated===true,
         order_included:includeOrder,
         order_after_cut_off:order.is_after_cut_off===true,
         order_closing_date_time:order.closing_date_time||''
@@ -381,7 +388,7 @@ class AhShoppingCard extends HTMLElement {
     const leftNote=view.delivery
       ? `${view.delivery}${view.time?` · ${view.time}`:''}${syncText}`
       : `${view.total_quantity??0} stuks${syncText}`;
-    const totalMeta=[view.bonus_savings? `Bonus −${this._money(view.bonus_savings)}`:'',articleText].filter(Boolean).join(' · ');
+    const totalMeta=[view.bonus_savings? `Bonus ${view.bonus_savings_estimated?'≈ ':''}−${this._money(view.bonus_savings)}`:'',articleText].filter(Boolean).join(' · ');
     return {view,title,leftNote,totalMeta,total:this._money(view.total_price||0)};
   }
 
@@ -576,16 +583,17 @@ class AhShoppingCard extends HTMLElement {
       const osc=ctx.createOscillator();
       const gain=ctx.createGain();
       osc.type='square';
-      osc.frequency.setValueAtTime(1380,now);
-      osc.frequency.setValueAtTime(1680,now+0.045);
+      // Synthesized checkout-scanner beep; not an official AH recording.
+      osc.frequency.setValueAtTime(2400,now);
       gain.gain.setValueAtTime(0.0001,now);
-      gain.gain.exponentialRampToValueAtTime(0.12,now+0.004);
-      gain.gain.setValueAtTime(0.12,now+0.075);
-      gain.gain.exponentialRampToValueAtTime(0.0001,now+0.115);
+      gain.gain.exponentialRampToValueAtTime(0.075,now+0.003);
+      gain.gain.setValueAtTime(0.075,now+0.065);
+      gain.gain.exponentialRampToValueAtTime(0.0001,now+0.085);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now+0.12);
+      osc.onended=()=>{osc.disconnect();gain.disconnect();};
+      osc.stop(now+0.09);
     }catch(e){}
   }
 
@@ -975,7 +983,7 @@ class AhShoppingCard extends HTMLElement {
         this._pulseScanner();
         this._renderScanResult();
         this._setScanStatus('');
-        if(this._config.scanner_mode!=='permanent')this._armScannerTimer(5000);
+        if(this._config.scanner_mode!=='permanent')this._armScannerTimer(10000);
       }catch(e){
         const message=String(e?.message||e||'');
         const notFound=/not found|niet gevonden|geen product|resource not found|404/i.test(message);
@@ -1157,6 +1165,7 @@ class AhShoppingCard extends HTMLElement {
       if(this._scanner)this._setScanStatus('');
       return;
     }
+    if(this._config.scanner_mode!=='permanent'&&!this._scanDeadline)this._armScannerTimer(60000);
     if(this._stream||this._cameraStarting)return;
     this._cameraStarting=true;
     try{
@@ -1204,7 +1213,7 @@ class AhShoppingCard extends HTMLElement {
     this._clearScanSession();
   }
 
-  _css(){return `:host{display:block;height:100%;min-height:0;overflow:hidden}ha-card{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}.fullCard{height:100%;min-height:0;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:24px 18px;column-gap:16px;row-gap:5px;align-items:center;padding:18px 18px 12px}.title{grid-column:1;grid-row:1;align-self:center;min-width:0;font-size:20px;font-weight:700;line-height:24px;margin:0}.total{grid-column:2;grid-row:1;align-self:center;text-align:right;font-size:21px;font-weight:700;line-height:24px;margin:0}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px}.headerSub{grid-column:1;grid-row:2;align-self:center;margin:0;font-size:12px;line-height:18px}.headerMeta{grid-column:2;grid-row:2;align-self:center;margin:0;text-align:right;color:var(--secondary-text-color);font-size:12px;line-height:18px;white-space:nowrap}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.unitSize{font-size:11px;color:var(--secondary-text-color);white-space:nowrap}.combinedBreakdown{font-size:10px;color:var(--secondary-text-color);white-space:nowrap}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.combinedQty span{font-size:13px;font-weight:700;min-width:22px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.inlineScanner{position:relative;flex:1 1 0;min-height:0;width:100%;overflow:hidden;background:#000}.inlineScanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transform-origin:center center;will-change:transform}.scanGuide{position:absolute;z-index:2;left:5%;right:5%;top:40%;height:20%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}.scanGuide:after{content:'';position:absolute;left:7%;right:7%;top:50%;height:2px;background:#f33}.scanRecent{position:absolute;z-index:4;top:10px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px;max-height:78%;overflow:hidden;pointer-events:none}.scanRecent.withClose{right:58px}.scanOverlayItem{pointer-events:auto;background:var(--card-background-color);border:0!important;border-radius:10px;box-shadow:0 2px 10px #0005;animation:scanRowIn .18s ease-out}.scanOverlayItem .compactMeta{min-height:14px}.scanOverlayItem .qty button{background:var(--secondary-background-color)}.scanClose{position:absolute;z-index:6;top:10px;right:10px;width:38px;height:38px;padding:0;border-radius:50%;background:#0009;color:#fff;font-size:24px;line-height:38px;backdrop-filter:blur(4px)}.scanHud{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:flex;justify-content:flex-end;align-items:flex-end;gap:8px;pointer-events:none}.scanPill{display:inline-block;max-width:70%;padding:5px 8px;border-radius:999px;background:#0009;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px)}.scanPill[hidden]{display:none!important}.scanStatus.error{margin-right:auto;max-width:min(72%,560px);padding:9px 12px;border-radius:10px;background:var(--error-color,#c62828);font-size:13px;font-weight:650;white-space:normal;line-height:1.3;box-shadow:0 3px 12px #0007}.scanTimer{max-width:none}.inlineScanner.scanHit:after{content:'';position:absolute;z-index:3;inset:0;border:3px solid #00a03c;box-shadow:inset 0 0 28px #00a03c88;pointer-events:none;animation:scanFlash .22s ease-out}@keyframes scanFlash{from{opacity:1}to{opacity:0}}@keyframes scanRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0)}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.scanOverlayItem{grid-template-columns:42px minmax(0,1fr) auto}.scanOverlayItem .qty{grid-column:auto;justify-content:flex-end}.scanOverlayItem img,.scanOverlayItem .ph{width:38px;height:38px}.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
+  _css(){return `:host{display:block;height:100%;min-height:0;overflow:hidden}ha-card{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}.fullCard{height:100%;min-height:0;display:flex;flex-direction:column}.fullCard .head,.fullCard .scanArea{flex:0 0 auto}.fullCard .items{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}.scanArea{padding:12px 14px}.head+.scanArea{padding-top:0}.scanWide{display:block;width:100%;margin:0;--ha-button-height:48px;font-size:16px}.scanWide::part(base){width:100%;justify-content:center}.head{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:minmax(24px,auto) 18px;column-gap:16px;row-gap:5px;align-items:center;padding:18px 18px 12px}.title{grid-column:1;grid-row:1;align-self:center;min-width:0;font-size:20px;font-weight:700;line-height:24px;margin:0}.total{grid-column:2;grid-row:1;align-self:center;text-align:right;font-size:21px;font-weight:700;line-height:24px;margin:0}.sub,small{display:block;color:var(--secondary-text-color);font-size:12px}.headerSub,.headerMeta{display:block;align-self:baseline;min-width:0;margin:0;font-size:12px;font-weight:400;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.headerSub{grid-column:1;grid-row:2}.headerMeta{grid-column:2;grid-row:2;text-align:right;color:var(--secondary-text-color)}button{border:0;border-radius:10px;padding:9px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:14px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);font-weight:600}.items{padding:0 10px 12px}.item{display:grid;grid-template-columns:54px 1fr auto;gap:10px;align-items:center;padding:10px 8px;border-top:1px solid var(--divider-color)}.item img,.ph{width:50px;height:50px;object-fit:contain;border-radius:8px}.compactItem{grid-template-columns:42px 1fr auto;gap:8px;padding:6px 8px}.compactItem img,.compactItem .ph{width:38px;height:38px}.compactItem .info b{font-size:13px}.compactMeta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:2px}.compactMeta .price{font-size:12px;font-weight:650}.unitSize{font-size:11px;color:var(--secondary-text-color);white-space:nowrap}.combinedBreakdown{font-size:10px;color:var(--secondary-text-color);white-space:nowrap}.compactQty button{width:28px;height:28px;font-size:17px}.compactQty span,.readonlyQty span{font-size:12px;min-width:16px}.combinedQty span{font-size:13px;font-weight:700;min-width:22px}.ph{display:grid;place-items:center;background:var(--secondary-background-color)}.info{min-width:0}.info b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-weight:650;margin-top:3px}.price s{font-weight:400;color:var(--secondary-text-color);font-size:12px}.bonus{display:inline-block;margin-top:4px;padding:2px 5px;border-radius:5px;background:#00a03c;color:white;font-size:10px;font-weight:800}.qty{display:flex;align-items:center;gap:5px}.qty button{width:34px;height:34px;padding:0;font-size:20px}.qty span{min-width:20px;text-align:center;font-weight:700}.qty .trash{margin-left:3px;color:var(--error-color);font-size:17px}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}.toast{position:fixed;z-index:10001;left:50%;bottom:26px;transform:translateX(-50%);background:#2e7d32;color:white;padding:10px 16px;border-radius:20px;box-shadow:0 4px 16px #0005}.toast.error{background:var(--error-color,#c62828)}.inlineScanner{position:relative;flex:1 1 0;min-height:0;width:100%;overflow:hidden;background:#000}.inlineScanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;transform-origin:center center;will-change:transform}.scanGuide{position:absolute;z-index:2;left:5%;right:5%;top:40%;height:20%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0003;pointer-events:none}.scanGuide:after{content:'';position:absolute;left:7%;right:7%;top:50%;height:2px;background:#f33}.scanRecent{position:absolute;z-index:4;top:10px;left:10px;right:10px;display:flex;flex-direction:column;gap:5px;max-height:78%;overflow:hidden;pointer-events:none}.scanRecent.withClose{right:58px}.scanOverlayItem{pointer-events:auto;background:var(--card-background-color);border:0!important;border-radius:10px;box-shadow:0 2px 10px #0005;animation:scanRowIn .18s ease-out}.scanOverlayItem .compactMeta{min-height:14px}.scanOverlayItem .qty button{background:var(--secondary-background-color)}.scanClose{position:absolute;z-index:6;top:10px;right:10px;width:38px;height:38px;padding:0;border-radius:50%;background:#0009;color:#fff;font-size:24px;line-height:38px;backdrop-filter:blur(4px)}.scanHud{position:absolute;z-index:5;left:10px;right:10px;bottom:10px;display:flex;justify-content:flex-end;align-items:flex-end;gap:8px;pointer-events:none}.scanPill{display:inline-block;max-width:70%;padding:5px 8px;border-radius:999px;background:#0009;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px)}.scanPill[hidden]{display:none!important}.scanStatus.error{margin-right:auto;max-width:min(72%,560px);padding:9px 12px;border-radius:10px;background:var(--error-color,#c62828);font-size:13px;font-weight:650;white-space:normal;line-height:1.3;box-shadow:0 3px 12px #0007}.scanTimer{max-width:none}.inlineScanner.scanHit:after{content:'';position:absolute;z-index:3;inset:0;border:3px solid #00a03c;box-shadow:inset 0 0 28px #00a03c88;pointer-events:none;animation:scanFlash .22s ease-out}@keyframes scanFlash{from{opacity:1}to{opacity:0}}@keyframes scanRowIn{from{transform:translateY(-8px);opacity:0}to{transform:translateY(0)}}@media(max-width:520px){.item{grid-template-columns:46px 1fr}.scanOverlayItem{grid-template-columns:42px minmax(0,1fr) auto}.scanOverlayItem .qty{grid-column:auto;justify-content:flex-end}.scanOverlayItem img,.scanOverlayItem .ph{width:38px;height:38px}.item{grid-template-columns:46px 1fr}.item img,.ph{width:42px;height:42px}.qty{grid-column:2;justify-content:flex-end}.head{padding:14px}.scanArea{padding-left:14px;padding-right:14px}}`;}
 }
 if(!customElements.get('ah-shopping-card'))customElements.define('ah-shopping-card',AhShoppingCard);
 window.customCards=window.customCards||[];
