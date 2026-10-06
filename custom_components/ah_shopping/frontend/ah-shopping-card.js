@@ -242,7 +242,8 @@ class AhShoppingCard extends HTMLElement {
       return {
         items:this._stableItems(order.items||[],'next_order'),
         total_quantity:order.total_quantity||0,
-        total_price:order.total_price||0,
+        total_price:order.estimated_product_total??order.total_price??0,
+        total_estimated:order.estimated_product_total!=null,
         bonus_savings:order.bonus_savings||0,
         bonus_savings_estimated:order.bonus_savings_estimated===true,
         unique_items:order.unique_items||0,
@@ -261,7 +262,8 @@ class AhShoppingCard extends HTMLElement {
       return {
         items,
         total_quantity:items.reduce((sum,i)=>sum+Number(i.quantity||0),0),
-        total_price:Number(list.estimated_total||0)+(includeOrder?Number(order.total_price||0):0),
+        total_price:Number(list.estimated_total||0)+(includeOrder?Number(order.estimated_product_total??order.total_price??0):0),
+        total_estimated:includeOrder&&order.estimated_product_total!=null,
         unique_items:items.length,
         label:'Winkelmandje + bestelling',
         edit_source:'shopping_list',
@@ -395,7 +397,7 @@ class AhShoppingCard extends HTMLElement {
       ? `${view.delivery}${view.time?` · ${view.time}`:''}${syncText}`
       : `${view.total_quantity??0} stuks${syncText}`;
     const totalMeta=[view.bonus_savings? `Bonus ${view.bonus_savings_estimated?'≈ ':''}−${this._money(view.bonus_savings)}`:'',articleText].filter(Boolean).join(' · ');
-    return {view,title,leftNote,totalMeta,total:this._money(view.total_price||0)};
+    return {view,title,leftNote,totalMeta,total:`${view.total_estimated?'≈ ':''}${this._money(view.total_price||0)}`};
   }
 
   _updateHeaderOnly(){

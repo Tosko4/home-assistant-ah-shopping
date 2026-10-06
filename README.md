@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.16
+## 0.2.17
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -429,3 +429,12 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Updates existing product elements instead of rebuilding the card; preserves the scroll container and focused quantity buttons.
 - Restores the visible row synchronously, with a surviving-row fallback after removal. Removes delayed scroll corrections that could override user scrolling.
 - Adds a Chromium regression test for delayed and reordered updates in shopping-list, combined and order views.
+
+### 0.2.17
+
+- Recognizes spaced multibuy labels such as `1 + 1 gratis`.
+- Rounds each half-price discount to cents before multiplying by the number of pairs.
+- Combines the verified Dr. Oetker Big Americans pizza variants for the `2 voor 5.99` offer. Other distinct products are not grouped by matching offer text alone.
+- Includes discounts already embedded in unit prices in displayed savings without subtracting them twice.
+- Adds `estimated_product_total` and `total_price_difference` to the order entity; retains the original AH `total_price`. Order views display the estimated product total with an ≈ marker, excluding unexplained differences in AH's order amount. Delivery charges, deposits and unsupported or mix-and-match promotions may differ from the amount payable.
+- Regression fixture matches the supplied 29-product example: €59.78 product total, €21.87 savings, €0.25 difference from the €60.03 API order amount.

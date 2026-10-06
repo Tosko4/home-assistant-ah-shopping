@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from decimal import Decimal, ROUND_HALF_UP
 import re
 from typing import Any
 
@@ -119,7 +120,7 @@ class ShoppingItem:
         if not self.product or not self.product.is_bonus or self.product.price_now <= 0:
             return 0.0
 
-        mechanism = (self.product.bonus_mechanism or "").upper().strip()
+        mechanism = re.sub(r"\s+", " ", (self.product.bonus_mechanism or "").upper()).strip()
         quantity = max(0, self.quantity)
         unit = self.product.price_now
 
@@ -128,9 +129,9 @@ class ShoppingItem:
             return 0.0
 
         if "2E HALVE PRIJS" in mechanism:
-            return round((quantity // 2) * unit * 0.5, 2)
+            return (quantity // 2) * _cents(unit / 2) / 100
 
-        if "1+1 GRATIS" in mechanism or "2E GRATIS" in mechanism:
+        if "1+1GRATIS" in mechanism.replace(" ", "") or "2EGRATIS" in mechanism.replace(" ", ""):
             return round((quantity // 2) * unit, 2)
 
         match = re.search(r"(\d+)\s+HALEN\s+(\d+)\s+BETALEN", mechanism)
@@ -173,6 +174,39 @@ class ShoppingItem:
         return result
 
 
+def _cents(value: float) -> int:
+    return int((Decimal(str(value)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _promotion_totals(items: tuple[ShoppingItem, ...]) -> tuple[float, float]:
+    """Embedded unit savings and additional multibuy savings in cents.
+
+    Group different products only for the verified Big Americans pizza family.
+    Identical mechanism labels alone do not prove a shared promotion.
+    """
+    embedded = 0
+    groups: dict[tuple, list[ShoppingItem]] = {}
+    for item in items:
+        product = item.product
+        if not product or not product.is_bonus:
+            continue
+        embedded += max(0, _cents(product.price_was) - _cents(product.price_now)) * max(0, item.quantity)
+        mechanism = re.sub(r"\s+", " ", product.bonus_mechanism.upper()).strip()
+        family = product.id
+        if (product.brand.casefold() == "dr. oetker"
+                and product.title.casefold().startswith("dr. oetker big americans pizza")
+                and re.fullmatch(r"2 VOOR €?\s*5[.,]99", mechanism)):
+            family = "big-americans-pizza"
+        key = (family, mechanism, _cents(product.price_now), _cents(product.price_was))
+        groups.setdefault(key, []).append(item)
+    additional = 0
+    for rows in groups.values():
+        first = rows[0]
+        merged = replace(first, quantity=sum(max(0, row.quantity) for row in rows))
+        additional += _cents(merged.bonus_savings)
+    return embedded / 100, additional / 100
+
+
 @dataclass(slots=True, frozen=True)
 class ShoppingListData:
     list_id: str
@@ -189,11 +223,11 @@ class ShoppingListData:
 
     @property
     def bonus_savings(self) -> float:
-        return round(sum(item.bonus_savings for item in self.items), 2)
+        return round(sum(_promotion_totals(self.items)), 2)
 
     @property
     def estimated_total(self) -> float:
-        return round(self.subtotal - self.bonus_savings, 2)
+        return round(self.subtotal - _promotion_totals(self.items)[1], 2)
 
     def quantity_for_product(self, product_id: int) -> int:
         item = self.item_for_product(product_id)
@@ -355,7 +389,21 @@ class NextOrderData:
 
     @property
     def bonus_savings(self) -> float:
-        return round(sum(item.bonus_savings for item in self.items), 2)
+        return self._pricing()[0]
+
+    def _pricing(self) -> tuple[float, float]:
+        lines = tuple(ShoppingItem("", item.product_id, item.quantity, product=Product(
+            id=item.product_id, title=item.title, brand=item.brand,
+            price_now=item.price_now, price_was=item.price_was,
+            is_bonus=item.is_bonus, bonus_mechanism=item.bonus_mechanism,
+        )) for item in self.items)
+        embedded, additional = _promotion_totals(lines)
+        subtotal = sum(_cents(item.line_total) for item in self.items) / 100
+        return round(embedded + additional, 2), round(subtotal - additional, 2)
+
+    @property
+    def estimated_product_total(self) -> float:
+        return self._pricing()[1]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -374,6 +422,8 @@ class NextOrderData:
             "delivery_start_time": self.delivery_start_time,
             "delivery_end_time": self.delivery_end_time,
             "total_price": round(self.total_price, 2),
+            "estimated_product_total": self.estimated_product_total,
+            "total_price_difference": round(self.total_price - self.estimated_product_total, 2),
             "bonus_savings": self.bonus_savings,
             "bonus_savings_estimated": True,
             "total_quantity": self.total_quantity,

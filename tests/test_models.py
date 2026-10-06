@@ -71,8 +71,8 @@ def test_second_half_price_bonus_four_items():
     )
     item = ShoppingItem("x", p.id, 4, p.title, p)
     assert item.line_total == 11.56
-    assert item.bonus_savings == 2.89
-    assert item.line_total_after_bonus == 8.67
+    assert item.bonus_savings == 2.90
+    assert item.line_total_after_bonus == 8.66
 
 
 def test_user_example_total_matches_ah_app():
@@ -96,8 +96,8 @@ def test_user_example_total_matches_ah_app():
         ),
     )
     assert data.subtotal == 32.02
-    assert data.bonus_savings == 2.89
-    assert data.estimated_total == 29.13
+    assert data.bonus_savings == 2.90
+    assert data.estimated_total == 29.12
 
 
 def test_optimistic_quantity_update():
@@ -210,8 +210,39 @@ def test_order_bonus_estimate_does_not_reduce_ah_total():
     pair = NextOrderItem(1, "Pair", 4, price_now=2.89, is_bonus=True, bonus_mechanism="2e HALVE PRIJS")
     reduced = NextOrderItem(2, "Reduced", 3, price_now=2, price_was=3, is_bonus=True)
     order = NextOrderData(total_price=14.67, items=(pair, reduced))
-    assert pair.bonus_savings == 2.89
+    assert pair.bonus_savings == 2.90
     assert reduced.bonus_savings == 3
-    assert order.as_dict()["bonus_savings"] == 5.89
+    assert order.as_dict()["bonus_savings"] == 5.90
     assert order.as_dict()["total_price"] == 14.67
     assert order.as_dict()["bonus_savings_estimated"] is True
+
+
+def test_order_exact_user_bonus_example():
+    from custom_components.ah_shopping.models import NextOrderItem, NextOrderData
+    order = NextOrderData(total_price=60.03, items=(
+        NextOrderItem(1, "Cheese", 4, price_now=2.89, price_was=2.89, is_bonus=True, bonus_mechanism="2e HALVE PRIJS"),
+        NextOrderItem(2, "Kwark", 2, price_now=1.99, price_was=1.99, is_bonus=True, bonus_mechanism="1 + 1 gratis"),
+        NextOrderItem(3, "Dr. Oetker Big Americans pizza Texas", 2, brand="Dr. Oetker", price_now=4.99, price_was=4.99, is_bonus=True, bonus_mechanism="2 voor 5.99"),
+        NextOrderItem(4, "Dr. Oetker Big americans pizza Supreme", 1, brand="Dr. Oetker", price_now=4.99, price_was=4.99, is_bonus=True, bonus_mechanism="2 voor 5.99"),
+        NextOrderItem(5, "Dr. Oetker Big Americans pizza BBQ pulled pork", 1, brand="Dr. Oetker", price_now=4.99, price_was=4.99, is_bonus=True, bonus_mechanism="2 voor 5.99"),
+        NextOrderItem(6, "Slimpie", 6, price_now=1.99, price_was=3.49, is_bonus=True),
+        NextOrderItem(7, "Other non-bonus products", 1, price_now=25.21),
+    ))
+    assert order.bonus_savings == 21.87
+    assert order.estimated_product_total == 59.78
+    assert order.as_dict()["total_price_difference"] == 0.25
+    assert order.total_price == 60.03
+
+
+def test_unrelated_products_with_same_deal_are_not_grouped():
+    products = [Product(id=i, title="Different product", brand="AH", price_now=4.99, price_was=4.99, is_bonus=True, bonus_mechanism="2 voor 5.99") for i in [1, 2]]
+    data = ShoppingListData("abc", "List", tuple(ShoppingItem("", p.id, 1, product=p) for p in products))
+    assert data.bonus_savings == 0
+    assert data.estimated_total == 9.98
+
+
+def test_embedded_discount_is_reported_without_double_subtraction():
+    product = Product(1, "Slimpie", price_now=1.99, price_was=3.49, is_bonus=True, bonus_mechanism="VOOR 1.99")
+    data = ShoppingListData("x", "List", (ShoppingItem("", 1, 2, product=product),))
+    assert data.bonus_savings == 3.00
+    assert data.estimated_total == 3.98
