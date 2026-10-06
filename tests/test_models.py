@@ -184,3 +184,22 @@ def test_next_order_totals():
     assert order.total_quantity == 5
     assert order.as_dict()["items"][0]["line_total"] == 3.00
 
+
+def test_next_order_cutoff_metadata_serializes():
+    from custom_components.ah_shopping.models import NextOrderData
+
+    order = NextOrderData(
+        order_id=42,
+        transaction_completed=False,
+        reopenable=False,
+        modifiable=False,
+        is_after_cut_off=True,
+        closing_date_time="2026-10-06T09:00:00+02:00",
+    )
+    payload = order.as_dict()
+    assert payload["order_id"] == 42
+    assert payload["reopenable"] is False
+    assert payload["modifiable"] is False
+    assert payload["is_after_cut_off"] is True
+    assert payload["closing_date_time"] == "2026-10-06T09:00:00+02:00"
+
