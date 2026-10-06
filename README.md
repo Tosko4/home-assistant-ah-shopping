@@ -6,7 +6,7 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 
 > Unofficial integration. Not affiliated with Albert Heijn or Ahold Delhaize. The private mobile API can change without notice.
 
-## 0.2.11
+## 0.2.12
 
 - Authenticated connection to your AH account
 - Reads AH "Mijn lijst", presented in the card as **Winkelmandje**
@@ -16,8 +16,9 @@ Home Assistant custom integration for managing Albert Heijn **Mijn lijst** as a 
 - Increase, decrease and remove quantities
 - Shows current price, old price, product image and Bonus text
 - Estimated list total
-- Camera barcode scanner directly inside the dashboard
-- Front/rear camera switch
+- Inline camera barcode scanner directly inside the dashboard
+- On-demand and permanent scanner modes
+- Front/rear camera selection and configurable 1×–4× zoom (2× default)
 - Local EAN-13/EAN-8 decoding; UPC-A is handled as EAN-13 with a leading zero
 - Native read-only `todo` entity for standard Home Assistant list views
 
@@ -361,3 +362,21 @@ Writes for the same product are serialized inside the integration. Explicit abso
 - Simplifies the combined-view header: the source label is no longer shown next to the delivery slot.
 - Shows the delivery date/time on the left below the title.
 - Shows Bonus savings and the article count below the total amount on the right.
+
+
+### 0.2.12
+
+- Replaces the old full-screen scanner dialog with an **inline scanner** inside the existing shopping card.
+- Adds two scanner modes: **Via scan button** replaces the product list temporarily, while **Permanent camera feed** turns a card into a dedicated scanner for side-by-side dashboard layouts.
+- Stops the camera whenever the card is not actually visible: backgrounded browser/app, another Home Assistant route/view, or fully outside the viewport.
+- Clears the recent-scan overlay when leaving the dashboard view so returning starts a fresh scanning session.
+- Makes scanner lifecycle safe across card rerenders and configuration changes so detached video elements cannot keep a camera stream running.
+- Adds **Front / Rear** camera selection in the card editor.
+- Adds configurable **1×–4× zoom**, default **2×**. Hardware zoom is used when available; otherwise the remaining zoom is applied as a centred digital crop.
+- Maps the decoder crop back to the exact visible scan guide, including Home Assistant card aspect ratio, `object-fit: cover` cropping and digital zoom.
+- Keeps ZXing as the fast Android/Fully Kiosk primary decoder and samples the heavier local/native fallbacks only after misses instead of on every frame.
+- Shows up to five recently scanned products over the camera feed at 100%, 80%, 60%, 40% and 20% opacity.
+- Re-scanning the same product updates its quantity and moves it back to the top rather than creating a duplicate overlay row.
+- Uses the same shared product-row renderer for the shopping list and scanner overlay to keep both layouts consistent.
+- Scanner overlay quantity controls can reduce a product all the way to **0**, removing it from Winkelmandje, with `+` available to add it again.
+- Keeps the shopping-list product order stable when quantities change and retains reliable internal/touch scrolling from 0.2.11.
