@@ -771,7 +771,8 @@ class AhShoppingCard extends HTMLElement {
       if(generation!==this._scanGeneration)return;
 
       video.srcObject=stream;
-      video.style.transform=`scale(${this._digitalZoom})`;
+      this._cameraMirrored=(track.getSettings?.().facingMode||this._facing)==='user';
+      video.style.transform=`scale(${this._digitalZoom}) scaleX(${this._cameraMirrored?-1:1})`;
       await video.play();
 
       this._scanCanvas=document.createElement('canvas');
@@ -1057,10 +1058,13 @@ class AhShoppingCard extends HTMLElement {
     const gx2=guideRect.right-stageRect.left;
     const gy2=guideRect.bottom-stageRect.top;
 
-    const ux1=inverseZoom(gx1,cw/2);
+    let ux1=inverseZoom(gx1,cw/2);
     const uy1=inverseZoom(gy1,ch/2);
-    const ux2=inverseZoom(gx2,cw/2);
+    let ux2=inverseZoom(gx2,cw/2);
     const uy2=inverseZoom(gy2,ch/2);
+    // The decoder reads the original camera pixels. Map the mirrored preview
+    // guide back to those pixels; overlays and barcode data remain unmirrored.
+    if(this._cameraMirrored)[ux1,ux2]=[cw-ux2,cw-ux1];
 
     const coverScale=Math.max(cw/vw,ch/vh);
     const displayedW=vw*coverScale;

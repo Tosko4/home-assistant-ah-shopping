@@ -2,6 +2,11 @@
 
 Historical entries describe the behaviour of that version; the [README](README.md) describes the current release.
 
+### 0.2.29
+
+- Mirrors the front-camera preview so left/right movement feels natural. Rear-camera preview keeps its normal orientation.
+- Maps the scan guide back to the original camera pixels when mirrored; decoding, overlays, sound and the successful-scan cooldown keep their behaviour.
+
 ### 0.2.28
 
 - Reads and transfers only a narrow central camera strip for the first Auto/C++ decoding attempt. Successful strip scans avoid full-crop pixel readback and transfer.

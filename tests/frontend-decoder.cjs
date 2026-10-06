@@ -50,6 +50,11 @@ const server=http.createServer((req,res)=>{
    cropCard._scanner={getBoundingClientRect:()=>({left:0,top:0,width:720,height:1280}),querySelector:()=>({getBoundingClientRect:()=>({left:100,top:500,right:620,bottom:780})})};
    const crop=cropCard._scanSourceRect({videoWidth:1920,videoHeight:1080});
    const cropMargins=crop.sw>438&&crop.sx>=0&&crop.sx+crop.sw<=1920&&crop.sy+crop.sh<=1080;
+   cropCard._scanner.querySelector=()=>({getBoundingClientRect:()=>({left:60,top:500,right:300,bottom:780})});
+   const originalCrop=cropCard._scanSourceRect({videoWidth:1920,videoHeight:1080});
+   cropCard._cameraMirrored=true;
+   const mirroredCrop=cropCard._scanSourceRect({videoWidth:1920,videoHeight:1080});
+   const mirrorProjection=Math.abs(mirroredCrop.sx-(1920-originalCrop.sx-originalCrop.sw))<=2&&Math.abs(mirroredCrop.sw-originalCrop.sw)<=1&&mirroredCrop.sy===originalCrop.sy;
    const rotated=document.createElement('canvas');rotated.width=180;rotated.height=500;
    const rctx=rotated.getContext('2d');rctx.translate(180,0);rctx.rotate(Math.PI/2);rctx.drawImage(canvas,0,0);
    const rotatedCode=await decode(rotated);
@@ -132,10 +137,11 @@ const server=http.createServer((req,res)=>{
    const cooldown=card._scanLoop!=null&&scheduled===1;
    card._cancelScheduledScan();window.requestAnimationFrame=originalRAF;window.cancelAnimationFrame=originalCancel;
    card._cancelScheduledScan();card._stopWasmWorker();
-   return {normal,fastBand,smallCode,softCode,skewCode,cropMargins,rotatedCode,offCenter,stripOnlyTransfer,rotatedPipeline,immediate,cooldown,noFalsePositive,duplicateProtected,nativeIndependent,fullPipeline,timeoutRecovered,nativeTimeout,failureRecovered,successGreen,cooldownBlocks,redAfterCooldown,pauseNotAbsence,heldAfterPause,deliberateRepeat,pendingBlocks,failedNoCooldown,cleanVisuals};
+   return {normal,fastBand,smallCode,softCode,skewCode,cropMargins,mirrorProjection,rotatedCode,offCenter,stripOnlyTransfer,rotatedPipeline,immediate,cooldown,noFalsePositive,duplicateProtected,nativeIndependent,fullPipeline,timeoutRecovered,nativeTimeout,failureRecovered,successGreen,cooldownBlocks,redAfterCooldown,pauseNotAbsence,heldAfterPause,deliberateRepeat,pendingBlocks,failedNoCooldown,cleanVisuals};
   });
   for(const key of ['normal','fastBand','smallCode','softCode','skewCode','rotatedCode','offCenter'])assert.equal(results[key],'4006381333931',key);
   assert.equal(results.cropMargins,true,'portrait camera crop includes quiet zones');
+  assert.equal(results.mirrorProjection,true,'mirrored guide maps to original camera pixels');
   for(const key of ['nativeIndependent','fullPipeline','stripOnlyTransfer','rotatedPipeline','timeoutRecovered','nativeTimeout','failureRecovered'])assert.equal(results[key],true,key);
   for(const key of ['successGreen','cooldownBlocks','redAfterCooldown','pauseNotAbsence','heldAfterPause','deliberateRepeat','pendingBlocks','failedNoCooldown','cleanVisuals'])assert.equal(results[key],true,key);
   assert.equal(results.noFalsePositive,true);assert.equal(results.duplicateProtected,true);
